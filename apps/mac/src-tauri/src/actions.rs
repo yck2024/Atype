@@ -185,6 +185,14 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
         .cloned()
         .unwrap_or_default();
 
+    if provider.id == crate::settings::CLIPROXY_PROVIDER_ID
+        && api_key.trim().is_empty()
+        && !crate::settings::is_lan_url(&provider.base_url)
+    {
+        warn!("CLI Proxy URL is outside localhost/private LAN and has no API key; skipping LLM post-processing");
+        return None;
+    }
+
     // Ask these providers to skip reasoning/thinking — post-processing rarely
     // benefits from it and it adds seconds of latency. llm_client picks the
     // field the endpoint understands and retries without it if rejected.

@@ -53,10 +53,14 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
         ) : null
       ) : (
         <>
-          {state.selectedProvider?.id === "custom" && (
+          {state.canEditBaseUrl && (
             <SettingContainer
               title={t("settings.postProcessing.api.baseUrl.title")}
-              description={t("settings.postProcessing.api.baseUrl.description")}
+              description={
+                state.isCliProxyProvider
+                  ? t("settings.postProcessing.api.baseUrl.descriptionCliProxy")
+                  : t("settings.postProcessing.api.baseUrl.description")
+              }
               descriptionMode="tooltip"
               layout="horizontal"
               grouped={true}
@@ -66,7 +70,9 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
                   value={state.baseUrl}
                   onBlur={state.handleBaseUrlChange}
                   placeholder={t(
-                    "settings.postProcessing.api.baseUrl.placeholder",
+                    state.isCliProxyProvider
+                      ? "settings.postProcessing.api.baseUrl.placeholderCliProxy"
+                      : "settings.postProcessing.api.baseUrl.placeholder",
                   )}
                   disabled={state.isBaseUrlUpdating}
                   className="min-w-[380px]"
@@ -76,8 +82,16 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
           )}
 
           <SettingContainer
-            title={t("settings.postProcessing.api.apiKey.title")}
-            description={t("settings.postProcessing.api.apiKey.description")}
+            title={t(
+              state.isCliProxyProvider
+                ? "settings.postProcessing.api.apiKey.titleCliProxy"
+                : "settings.postProcessing.api.apiKey.title",
+            )}
+            description={t(
+              state.isCliProxyProvider
+                ? "settings.postProcessing.api.apiKey.descriptionCliProxy"
+                : "settings.postProcessing.api.apiKey.description",
+            )}
             descriptionMode="tooltip"
             layout="horizontal"
             grouped={true}
@@ -87,7 +101,9 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
                 value={state.apiKey}
                 onBlur={state.handleApiKeyChange}
                 placeholder={t(
-                  "settings.postProcessing.api.apiKey.placeholder",
+                  state.isCliProxyProvider
+                    ? "settings.postProcessing.api.apiKey.placeholderCliProxy"
+                    : "settings.postProcessing.api.apiKey.placeholder",
                 )}
                 disabled={state.isApiKeyUpdating}
                 className="min-w-[320px]"
@@ -101,9 +117,11 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
         <SettingContainer
           title={t("settings.postProcessing.api.model.title")}
           description={
-            state.isCustomProvider
-              ? t("settings.postProcessing.api.model.descriptionCustom")
-              : t("settings.postProcessing.api.model.descriptionDefault")
+            state.isCliProxyProvider
+              ? t("settings.postProcessing.api.model.descriptionCliProxy")
+              : state.isCustomProvider
+                ? t("settings.postProcessing.api.model.descriptionCustom")
+                : t("settings.postProcessing.api.model.descriptionDefault")
           }
           descriptionMode="tooltip"
           layout="stacked"
