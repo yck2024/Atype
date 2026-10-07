@@ -171,7 +171,7 @@
         "bindings": {
           "transcribe": {
             "name": "Transcribe Shortcut",
-            "description": "The keyboard shortcut to record and transcribe your voice."
+            "description": "Click the current shortcut to change it. Single keys like F1 and key combinations are supported."
           },
           "cancel": {
             "name": "Cancel Shortcut",
@@ -197,7 +197,7 @@
       },
       "shortcutActivation": {
         "title": "Shortcut Behavior",
-        "description": "Choose how the transcribe shortcut starts and stops recording.",
+        "description": "Choose how the shortcut controls recording. In Toggle mode, press once to start and again to stop and transcribe.",
         "options": {
           "holdOrToggle": "Auto",
           "pushToTalk": "Hold",

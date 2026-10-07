@@ -171,7 +171,7 @@
         "bindings": {
           "transcribe": {
             "name": "轉錄快捷鍵",
-            "description": "用於錄製和轉錄語音的鍵盤快捷鍵"
+            "description": "點選目前的快捷鍵即可修改。可使用單一按鍵（例如 F1）或組合鍵。"
           },
           "cancel": {
             "name": "取消快捷鍵",
@@ -197,7 +197,7 @@
       },
       "shortcutActivation": {
         "title": "快捷鍵行為",
-        "description": "選擇轉錄快捷鍵開始和停止錄音的方式。",
+        "description": "選擇快捷鍵控制錄音的方式。「切換」模式按一次開始，再按一次停止並轉錄。",
         "options": {
           "holdOrToggle": "自動",
           "pushToTalk": "按住",
