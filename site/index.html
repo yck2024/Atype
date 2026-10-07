@@ -198,8 +198,8 @@
     </div>
     <div class="privacy">
       <div><h3>聲音不上傳</h3><p>錄音和辨識都在本機完成，主轉錄完全不需要網路。</p></div>
-      <div><h3>AI 用你自己的 key</h3><p>只有按 AI 指令時，辨識好的文字會送到你自己的 Gemini API key；不送音訊、視窗標題或網址。</p></div>
-      <div><h3>沒有帳號、不蒐集</h3><p>不用註冊，Atype 不回傳任何資料，紀錄只存在你指定的資料夾。</p></div>
+      <div><h3>AI 用你自己的帳號</h3><p>啟用 AI 後處理時，只有辨識好的文字會送到你設定的 LLM 供應商；可直接用 API key，也可透過本機 CLIProxyAPI 使用已登入的帳號。不送音訊、視窗標題或網址。</p></div>
+      <div><h3>Atype 不收集資料</h3><p>Atype 不需要帳號，也不回傳資料；外部供應商登入由你選用的服務管理，紀錄只存在你指定的資料夾。</p></div>
     </div>
   </div>
 </section>
@@ -213,7 +213,7 @@
       <div class="step"><div><h3>第一次打開：按「仍要打開」</h3><p>Atype 沒有經過 Apple 公證，macOS 會先擋下來。到「系統設定 → 隱私權與安全性」，往下找到 Atype，按「仍要打開」。只需要一次。如果出現「已損毀」，在終端機執行：</p><pre><code>xattr -dr com.apple.quarantine /Applications/Atype.app</code></pre></div></div>
       <div class="step"><div><h3>給麥克風與輔助使用權限</h3><p>照 App 的指示授權。輔助使用是用來把字貼進其他 App。</p></div></div>
       <div class="step"><div><h3>下載語音模型（250 MB）</h3><p>首頁選 SenseVoice Small，下載一次就好。</p></div></div>
-      <div class="step"><div><h3>（選用）填入你的 Gemini API key</h3><p>到 <a href="https://aistudio.google.com/apikey">Google AI Studio</a> 免費建立，貼到「後處理」頁。不填也能用主轉錄，只是沒有 AI 指令。</p></div></div>
+      <div class="step"><div><h3>（選用）設定 LLM</h3><p>可在「後處理」頁填入 <a href="https://aistudio.google.com/apikey">Gemini API key</a>，或選 CLI Proxy，連到已啟動並完成供應商登入的 CLIProxyAPI。不設定也能用主轉錄，只是沒有 AI 指令。</p></div></div>
     </div>
     <p class="footnote" style="text-align:left">iPhone 版的安裝方式在 <a href="iphone.html#install">iPhone 頁面</a>。</p>
     <details>
@@ -232,7 +232,7 @@ bun run app:install</code></pre>
     <div class="center"><div class="eyebrow">常見問題</div>
     <h2>問與答</h2></div>
     <div style="height:24px"></div>
-    <details><summary>要錢嗎？</summary><p>Atype 免費。主轉錄完全在本機，不花錢。AI 指令用你自己的 Gemini API key，一個人每天說 3,000 字大約每月 US$0.5，而且 Google 有免費額度。</p></details>
+    <details><summary>要錢嗎？</summary><p>Atype 免費。主轉錄完全在本機，不花錢。AI 指令的費用依你選用的 LLM 供應商與帳號方案而定。</p></details>
     <details><summary>Intel 的 Mac 可以用嗎？</summary><p>目前只提供 Apple 晶片（M1 以後）的版本。</p></details>
     <details><summary>可以換熱鍵嗎？</summary><p>可以。「一般」頁改主轉錄，「後處理」頁改 AI 指令。建議 AI 指令設成主轉錄再加一個鍵，就能說到一半再升級成 AI。</p></details>
     <details><summary>沒網路時怎麼辦？</summary><p>主轉錄照常運作。AI 指令會在時間到之後，貼上本機處理過的版本。</p></details>

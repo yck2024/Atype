@@ -512,25 +512,31 @@
         "title": "API（相容 OpenAI）",
         "provider": {
           "title": "供應商",
-          "description": "選擇一個相容 OpenAI 的供應商"
+          "description": "選擇供應商。CLI Proxy 會透過正在執行的 CLIProxyAPI，使用已在該處登入的帳號。"
         },
         "appleIntelligence": {
           "unavailable": "Apple Intelligence 在此裝置上不可用。需要執行 macOS Tahoe（26.0）或更高版本的 Apple Silicon Mac，並在系統設定中啟用 Apple Intelligence"
         },
         "baseUrl": {
           "title": "基礎網址",
-          "description": "所選供應商的 API 基礎網址，僅自訂供應商可編輯",
-          "placeholder": "https://api.openai.com/v1"
+          "description": "所選供應商的 API 基礎網址。自訂與 CLI Proxy 網址可以編輯。",
+          "descriptionCliProxy": "CLIProxyAPI 伺服器網址。請先在 CLIProxyAPI 登入要使用的上游供應商。",
+          "placeholder": "https://api.openai.com/v1",
+          "placeholderCliProxy": "http://127.0.0.1:8317/v1"
         },
         "apiKey": {
           "title": "API 金鑰",
           "description": "所選供應商的 API 金鑰",
-          "placeholder": "sk-..."
+          "placeholder": "sk-...",
+          "titleCliProxy": "Proxy API 金鑰",
+          "descriptionCliProxy": "使用 localhost 或私人 LAN 位址時可留空；其他網址必須填入金鑰。上游登入由 CLIProxyAPI 管理。",
+          "placeholderCliProxy": "LAN 可留空；遠端網址必填"
         },
         "model": {
           "title": "模型",
           "descriptionCustom": "輸入自訂端點所需的模型 ID",
           "descriptionDefault": "從所選供應商的可用模型中選擇",
+          "descriptionCliProxy": "選擇 CLIProxyAPI 提供的模型。變更上游登入設定後，請重新整理模型清單。",
           "placeholderWithOptions": "搜尋或選擇模型",
           "placeholderNoOptions": "輸入模型名稱",
           "refreshModels": "重新整理模型"

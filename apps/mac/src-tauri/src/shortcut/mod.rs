@@ -1089,16 +1089,21 @@ pub fn change_post_process_base_url_setting(
     base_url: String,
 ) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
-    let label = settings
+    let (label, allow_base_url_edit) = settings
         .post_process_provider(&provider_id)
-        .map(|provider| provider.label.clone())
+        .map(|provider| {
+            (
+                provider.label.clone(),
+                provider.allow_base_url_edit || provider.id == "custom",
+            )
+        })
         .ok_or_else(|| format!("Provider '{}' not found", provider_id))?;
 
     let provider = settings
         .post_process_provider_mut(&provider_id)
         .expect("Provider looked up above must exist");
 
-    if provider.id != "custom" {
+    if !allow_base_url_edit {
         return Err(format!(
             "Provider '{}' does not allow editing the base URL",
             label
@@ -1276,8 +1281,12 @@ pub async fn fetch_post_process_models(
         .cloned()
         .unwrap_or_default();
 
-    // Skip fetching if no API key for providers that typically need one
-    if api_key.trim().is_empty() && provider.id != "custom" {
+    // A local CLI Proxy can be unauthenticated on localhost/private LAN. A
+    // proxy URL outside the LAN requires its configured API key.
+    let key_optional_for_provider = provider.id == "custom"
+        || (provider.id == crate::settings::CLIPROXY_PROVIDER_ID
+            && crate::settings::is_lan_url(&provider.base_url));
+    if api_key.trim().is_empty() && !key_optional_for_provider {
         return Err(format!(
             "API key is required for {}. Please add an API key to list available models.",
             provider.label

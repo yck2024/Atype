@@ -42,7 +42,7 @@ Atype 要能把字貼進其他 App，需要「系統設定 → 隱私權與安�
 ## 第一次設定
 
 1. **模型**：首頁選 SenseVoice Small（約 240 MB）。想比較就到「模型」頁再下載 Qwen3-ASR 0.6B。
-2. **LLM 整理**：請自備 Gemini API key（https://aistudio.google.com/apikey 免費建立）。側邊欄「後處理」：供應商 Gemini、貼上 key。模型預設 `gemini-3.1-flash-lite`，提示詞預設「整理口語（zh-TW）」，都不用改。模型選單只列得出能用的模型。沒有 key 也能用，只是不會去贅詞、整理語句或幫你寫信。
+2. **LLM 整理**：可直接用 Gemini API key，也可用 CLIProxyAPI 已登入的供應商。Gemini：到 https://aistudio.google.com/apikey 建立 key，再到側邊欄「後處理」選 Gemini 並貼上。CLI Proxy：先啟動 CLIProxyAPI 並在該工具登入供應商，接著在「後處理」選 CLI Proxy；預設網址是 `http://127.0.0.1:8317/v1`，網址可自行修改。使用 localhost 或私人 LAN 位址時，Proxy API 金鑰可留空；其他網址需要填入 CLIProxyAPI 設定的 `api-key`。按模型旁的重新整理，再選要用的模型。Gemini 預設模型是 `gemini-3.1-flash-lite`，提示詞預設「整理口語（zh-TW）」。沒有設定 LLM 也能轉錄，只是不會去贅詞、整理語句或幫你寫信。
 3. **熱鍵**：預設 Option + Space。要改 Fn：在「一般」裡改，並把「系統設定 → 鍵盤 → 按下 🌐 鍵時」設成「不執行任何操作」。
 
 ## 每天怎麼用

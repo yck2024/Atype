@@ -4,11 +4,57 @@ use serde::{Deserialize, Deserializer, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 use std::fmt;
+use std::net::{IpAddr, Ipv4Addr};
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
 pub const APPLE_INTELLIGENCE_PROVIDER_ID: &str = "apple_intelligence";
 pub const APPLE_INTELLIGENCE_DEFAULT_MODEL_ID: &str = "Apple Intelligence";
+pub const CLIPROXY_PROVIDER_ID: &str = "cliproxy";
+
+/// Treat loopback, private/link-local IPs, and local hostnames as LAN URLs.
+/// A CLI Proxy API key may be omitted for these endpoints; remote hosts need
+/// the key configured by the proxy.
+pub fn is_lan_url(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url) else {
+        return false;
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return false;
+    }
+
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if let Ok(address) = host.parse::<IpAddr>() {
+        return match address {
+            IpAddr::V4(address) => is_lan_ipv4(address),
+            IpAddr::V6(address) => {
+                address.to_ipv4_mapped().is_some_and(is_lan_ipv4)
+                    || address.is_loopback()
+                    || (address.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
+                    || (address.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
+            }
+        };
+    }
+
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host == "localhost"
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+        || host.ends_with(".lan")
+        || host == "home.arpa"
+        || host.ends_with(".home.arpa")
+        || host.ends_with(".home")
+        || host.ends_with(".internal")
+        || !host.contains('.')
+}
+
+fn is_lan_ipv4(address: Ipv4Addr) -> bool {
+    let octets = address.octets();
+    address.is_private() || address.is_loopback() || (octets[0] == 169 && octets[1] == 254)
+    // 169.254.0.0/16 link-local
+}
 
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
 #[serde(rename_all = "lowercase")]
@@ -674,8 +720,8 @@ fn default_post_process_provider_id() -> String {
 }
 
 fn default_post_process_providers() -> Vec<PostProcessProvider> {
-    // Atype: only the providers the personal plan uses. Gemini and Groq speak the
-    // OpenAI-compatible protocol; Anthropic has its own path in llm_client.
+    // Atype: direct providers plus a local CLIProxyAPI endpoint. The proxy
+    // handles upstream provider sign-in and exposes an OpenAI-compatible API.
     let mut providers = vec![
         PostProcessProvider {
             id: "gemini".to_string(),
@@ -698,6 +744,14 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
             label: "Groq".to_string(),
             base_url: "https://api.groq.com/openai/v1".to_string(),
             allow_base_url_edit: false,
+            models_endpoint: Some("/models".to_string()),
+            supports_structured_output: false,
+        },
+        PostProcessProvider {
+            id: CLIPROXY_PROVIDER_ID.to_string(),
+            label: "CLI Proxy".to_string(),
+            base_url: "http://127.0.0.1:8317/v1".to_string(),
+            allow_base_url_edit: true,
             models_endpoint: Some("/models".to_string()),
             supports_structured_output: false,
         },

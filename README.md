@@ -8,7 +8,7 @@
 
 ## 在 Mac 上安裝
 
-只支援 Apple 晶片（M1 以後）的 Mac。LLM 整理請自備 Gemini API key。
+只支援 Apple 晶片（M1 以後）的 Mac。LLM 整理可用 Gemini API key，或透過 CLIProxyAPI 使用已登入的供應商。
 
 - **下載編好的 App**：到 [Releases](https://github.com/JohnKeng/Atype/releases/latest) 下載 zip，把 `Atype.app` 拖進「應用程式」。App 沒有經過 Apple 公證，第一次打開會被擋，要到「系統設定 → 隱私權與安全性」按「仍要打開」。
 - **自己編**：需要 Xcode Command Line Tools、Rust、bun、cmake，第一次約 5 到 10 分鐘。
@@ -20,7 +20,7 @@ bun install
 bun run app:install      # 編譯並安裝到「應用程式」
 ```
 
-兩種方式的詳細步驟、被擋時怎麼打開、第一次設定（下載模型、填 Gemini key、給權限）與每天的用法，都在 [`apps/mac/README.md`](apps/mac/README.md)。
+兩種方式的詳細步驟、被擋時怎麼打開、第一次設定（下載模型、設定 LLM、給權限）與每天的用法，都在 [`apps/mac/README.md`](apps/mac/README.md)。
 
 ## iPhone
 
@@ -42,7 +42,7 @@ open Atype.xcodeproj
 flowchart LR
   K[按住 Option + Space] --> R[錄音]
   R --> S[本機辨識<br/>SenseVoice Small]
-  S --> L{{LLM 整理<br/>Gemini · 2.5 秒預算}}
+  S --> L{{LLM 整理<br/>Gemini 或 CLI Proxy · 2.5 秒預算}}
   L -->|回來| Z[確定性中文層<br/>繁體 · 全形標點 · 中英空格]
   L -->|逾時或失敗| Z
   Z --> P[貼到目前的 App]
