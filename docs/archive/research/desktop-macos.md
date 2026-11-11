@@ -176,7 +176,7 @@ Apple 文件（macOS 10.9+）：「Prompting occurs asynchronously and does not 
 ### 2.5 Secure Input（密碼欄、Terminal 安全鍵盤輸入）
 
 - Apple TN2150：啟用後系統阻擋鍵盤事件到達任何攔截程序，包括 CGEvent event taps；若某程序在背景忘了關，會持續封鎖全系統（https://developer.apple.com/library/archive/technotes/tn2150/_index.html）。
-- Handy `secure_input.rs` 的實測（註解）：「CGEventTaps stop receiving KeyDown/KeyUp events while FlagsChanged still flows」→ Option+Space 這類有主鍵的熱鍵靜默失效，純修飾鍵熱鍵照常。對策：每 1 秒輪詢 Carbon `IsSecureEventInputEnabled()`，持續 3 秒才視為「卡住」；卡住期間把有主鍵的綁定**影子註冊到 Tauri global-shortcut（Carbon）**，因為 Carbon 熱鍵不受 Secure Input 影響；用 `ioreg -l -w 0` 找 `kCGSSessionSecureInputPID` 猜肇事程序（Apple 無可靠 API，常指到父程序或 loginwindow）；錄製新熱鍵時若 Secure Input 中則拒絕並顯示橫幅（https://github.com/cjpais/Handy/blob/main/src-tauri/src/secure_input.rs）。
+- Handy `secure_input.rs` 的實測（註解）：「CGEventTaps stop receiving KeyDown/KeyUp events while FlagsChanged still flows」→ Option+Space 這類有主鍵的熱鍵靜默失效，純修飾鍵熱鍵照常。Atype 每秒輪詢 Carbon `IsSecureEventInputEnabled()`，一觀測到啟用便把可用的含主鍵綁定**影子註冊到 Tauri global-shortcut（Carbon）**；Carbon 熱鍵不受 Secure Input 影響。持續 3 秒且仍有受影響（降級或無法註冊）的綁定才顯示警告，解除後即清除。快捷鍵錄製遇到 Secure Input 時改從設定視窗自身的按鍵事件擷取（視窗事件不受另一個 App 的 Secure Input 阻擋）；此模式不能錄製純修飾鍵或含 Fn 的快捷鍵。用 `ioreg -l -w 0` 找 `kCGSSessionSecureInputPID` 猜肇事程序（Apple 無可靠 API，常指到父程序或 loginwindow）。詳見目前實作 `apps/mac/src-tauri/src/secure_input.rs` 與 `apps/mac/src/lib/utils/windowShortcutCapture.ts`。
 
 ---
 
