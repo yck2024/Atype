@@ -14,7 +14,7 @@
 - **自己編**：需要 Xcode Command Line Tools、Rust、bun、cmake，第一次約 5 到 10 分鐘。
 
 ```bash
-git clone https://github.com/JohnKeng/Atype.git
+git clone https://github.com/yck2024/Atype.git
 cd Atype/apps/mac
 bun install
 bun run app:install      # 編譯並安裝到「應用程式」

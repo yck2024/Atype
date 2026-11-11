@@ -23,7 +23,7 @@
 需要 Xcode Command Line Tools、Rust（`rustup`）、[bun](https://bun.sh)、cmake（`brew install cmake`）。完整的 Xcode 不需要。第一次約 5 到 10 分鐘。自己編的 App 不會被擋。
 
 ```bash
-git clone https://github.com/JohnKeng/Atype.git
+git clone https://github.com/yck2024/Atype.git
 cd Atype/apps/mac
 bun install
 bun run app:install    # 編譯 release 版，裝到 /Applications/Atype.app 並啟動
