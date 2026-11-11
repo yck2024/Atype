@@ -10,7 +10,7 @@
 
 只支援 Apple 晶片（M1 以後）的 Mac。LLM 整理可用 Gemini API key，或透過 CLIProxyAPI 使用已登入的供應商。
 
-- **下載編好的 App**：到 [Releases](https://github.com/JohnKeng/Atype/releases/latest) 下載 zip，把 `Atype.app` 拖進「應用程式」。App 沒有經過 Apple 公證，第一次打開會被擋，要到「系統設定 → 隱私權與安全性」按「仍要打開」。
+- **下載編好的 App**：到 [Releases](https://github.com/yck2024/Atype/releases/latest) 下載 zip，把 `Atype.app` 拖進「應用程式」。App 沒有經過 Apple 公證，第一次打開會被擋，要到「系統設定 → 隱私權與安全性」按「仍要打開」。
 - **自己編**：需要 Xcode Command Line Tools、Rust、bun、cmake，第一次約 5 到 10 分鐘。
 
 ```bash

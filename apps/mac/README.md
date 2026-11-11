@@ -8,7 +8,7 @@
 
 ### 方式一：下載編好的 App（不用裝開發工具）
 
-1. 到 [Releases](https://github.com/JohnKeng/Atype/releases/latest) 下載 `Atype-<版本>-macos-arm64.zip`，解壓縮，把 `Atype.app` 拖進「應用程式」。
+1. 到 [Releases](https://github.com/yck2024/Atype/releases/latest) 下載 `Atype-<版本>-macos-arm64.zip`，解壓縮，把 `Atype.app` 拖進「應用程式」。
 2. **第一次打開會被擋**：這個 App 沒有經過 Apple 公證，macOS 會說「無法驗證開發者」或「Apple 無法檢查是否包含惡意軟體」。這時：
    - 按「完成」關掉提示，到「系統設定 → 隱私權與安全性」，往下捲到「已阻擋 Atype」，按 **「仍要打開」**，輸入密碼後再按一次「打開」。只要做一次。
    - 如果看到的是「**已損毀，應丟到垃圾桶**」，在終端機執行下面這行再打開：
@@ -30,6 +30,8 @@ bun run app:install    # 編譯 release 版，裝到 /Applications/Atype.app 並
 ```
 
 更新：`git pull` 後再跑一次 `bun run app:install`。
+
+只想打包成 zip（不安裝、不動 `/Applications`）：`bun run app:package`，會在 `apps/mac/` 產生 `Atype-<版本>-macos-arm64.zip`。
 
 ### 輔助使用權限（兩種方式都要）
 
