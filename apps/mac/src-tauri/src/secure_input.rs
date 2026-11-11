@@ -10,9 +10,14 @@
 //! - polls `IsSecureEventInputEnabled()` and tracks state transitions
 //! - looks up the holding process (best effort — Apple documents no reliable
 //!   API; the IORegistry PID is frequently wrong or absent)
-//! - while secure input is sustained, shadow-registers vulnerable *keyed*
+//! - as soon as secure input is observed, shadow-registers vulnerable *keyed*
 //!   bindings through the Carbon-backed Tauri global-shortcut path, which is
-//!   not affected by secure input (modifier-only bindings need no fallback)
+//!   not affected by secure input (modifier-only bindings need no fallback).
+//!   The user-facing warning still waits until secure input is *sustained*,
+//!   so a momentary password-field focus never shows a banner, but dictation
+//!   no longer has a multi-second dead window at the start of every episode
+//! - drops those shadows while the settings window records a shortcut, so a
+//!   Carbon hotkey cannot fire or swallow the keys being recorded
 //! - dynamically shadows the Cancel binding while recording, so Escape and
 //!   other keyed cancellation shortcuts remain available under secure input
 //! - exposes a count-only keyboard diagnostic for the debug window. Only
@@ -39,10 +44,6 @@ pub struct SecureInputStatus {
     pub degraded_bindings: Vec<String>,
     /// Binding ids that cannot fire at all (e.g. fn+key, registration failure)
     pub uncovered_bindings: Vec<String>,
-    /// The user tried to record a shortcut while secure input was active.
-    /// Treated as user impact even when every binding is covered, so the
-    /// warning banner appears and explains why recording refused.
-    pub recorder_blocked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -77,11 +78,13 @@ pub fn is_enabled_now() -> bool {
     imp::is_enabled()
 }
 
-/// Record that a shortcut-recording attempt was refused because secure input
-/// is active. Flips the warning state so the banner/tray explain the refusal
-/// even when every registered binding is covered by the fallback.
-pub fn note_recorder_blocked(app: &AppHandle) {
-    imp::note_recorder_blocked(app)
+/// Suspend or resume the Carbon fallback shadows while the settings window
+/// records a shortcut. Mirrors `shortcut::suspend_all_shortcuts`: a Carbon
+/// hotkey would otherwise fire (and consume) the very keys being recorded,
+/// which matters when the recorder reads the window's own key events because
+/// another app holds Secure Input.
+pub fn set_shortcuts_suspended(app: &AppHandle, suspended: bool) {
+    imp::set_shortcuts_suspended(app, suspended)
 }
 
 /// Register/unregister the dynamic Cancel binding through the Carbon fallback
@@ -109,7 +112,8 @@ pub fn init(app: &AppHandle) {
 
 /// Whether the tray should show the warning badge / menu entry.
 ///
-/// Only when the user is actually impacted: a binding is degraded or dead.
+/// Only when the user is actually impacted: secure input is sustained and a
+/// binding is degraded or dead.
 /// When every affected binding is covered transparently by the fallback (or
 /// none are affected), the experience is seamless and nothing is shown.
 pub fn tray_warning_active(app: &AppHandle) -> bool {
@@ -123,6 +127,7 @@ mod imp {
     use super::*;
     use crate::settings::{self, KeyboardImplementation, ShortcutBinding};
     use log::{debug, error, info, warn};
+    use std::collections::HashMap;
     use std::process::Command;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
@@ -130,9 +135,97 @@ mod imp {
 
     /// How often the monitor thread polls.
     const POLL_INTERVAL: Duration = Duration::from_secs(1);
-    /// Secure input must be held this long before we treat it as stuck.
-    /// Momentary activation (a password field gaining focus) is normal.
+    /// Secure input must be held this long before we *warn* about it.
+    /// Momentary activation (a password field gaining focus) is normal. The
+    /// Carbon fallback does not wait for this: it is armed on the first
+    /// enabled sample so keyed dictation shortcuts keep working throughout.
     const SUSTAIN_THRESHOLD: Duration = Duration::from_secs(3);
+
+    /// Transitions reported by [`EpisodeTracker::observe`] for one sample.
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub(super) struct EpisodeStep {
+        /// Secure input was just observed enabled: arm the Carbon fallback.
+        pub became_enabled: bool,
+        /// Held past [`SUSTAIN_THRESHOLD`]: the warning may now surface.
+        pub became_sustained: bool,
+        /// Released: drop the fallback and clear every warning.
+        pub became_disabled: bool,
+    }
+
+    /// Pure Secure Input episode state machine, fed one sample per poll.
+    /// Kept free of `AppHandle` so tests can drive it with injected samples
+    /// and timestamps.
+    #[derive(Debug, Default)]
+    pub(super) struct EpisodeTracker {
+        enabled_since: Option<Instant>,
+        sustained: bool,
+    }
+
+    impl EpisodeTracker {
+        pub fn observe(&mut self, enabled: bool, now: Instant) -> EpisodeStep {
+            let mut step = EpisodeStep::default();
+            match (enabled, self.enabled_since) {
+                (true, None) => {
+                    self.enabled_since = Some(now);
+                    step.became_enabled = true;
+                }
+                (true, Some(since)) => {
+                    if !self.sustained && now.saturating_duration_since(since) >= SUSTAIN_THRESHOLD
+                    {
+                        self.sustained = true;
+                        step.became_sustained = true;
+                    }
+                }
+                (false, Some(_)) => {
+                    self.enabled_since = None;
+                    self.sustained = false;
+                    step.became_disabled = true;
+                }
+                (false, None) => {}
+            }
+            step
+        }
+    }
+
+    /// Inputs that decide which bindings the Carbon fallback should shadow.
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct FallbackContext {
+        /// Secure input observed, shortcuts initialized, handy-keys active.
+        pub armed: bool,
+        /// The settings window is recording a shortcut.
+        pub suspended: bool,
+        /// An audio recording wants the dynamic Cancel binding.
+        pub cancel_requested: bool,
+        pub post_process_enabled: bool,
+    }
+
+    /// Binding ids the fallback should consider, in a stable order.
+    pub(super) fn fallback_candidates(
+        bindings: &HashMap<String, ShortcutBinding>,
+        ctx: FallbackContext,
+    ) -> Vec<String> {
+        if !ctx.armed {
+            return Vec::new();
+        }
+        let mut ids: Vec<String> = bindings
+            .keys()
+            .filter(|id| {
+                if id.as_str() == "cancel" {
+                    // Managed by the audio-recording lifecycle, like the
+                    // primary implementation; recording a shortcut in the
+                    // settings window leaves it untouched.
+                    return ctx.cancel_requested;
+                }
+                if ctx.suspended {
+                    return false;
+                }
+                id.as_str() != "transcribe_with_post_process" || ctx.post_process_enabled
+            })
+            .cloned()
+            .collect();
+        ids.sort();
+        ids
+    }
 
     #[link(name = "Carbon", kind = "framework")]
     extern "C" {
@@ -165,16 +258,19 @@ mod imp {
     }
 
     pub struct SecureInputState {
+        /// Secure input was enabled at the monitor's last sample. Arms the
+        /// Carbon fallback.
         enabled: AtomicBool,
+        /// Held past the sustain threshold. Gates user-facing warnings only.
         sustained: AtomicBool,
-        enabled_since: Mutex<Option<Instant>>,
         culprit: Mutex<Option<Culprit>>,
         fallback: Mutex<FallbackState>,
         /// Serializes fallback registration changes without requiring the
         /// fallback state lock to be held across global-shortcut plugin calls.
         fallback_operation: Mutex<()>,
-        recorder_blocked: AtomicBool,
         cancel_requested: AtomicBool,
+        /// The settings window is recording a shortcut; keep shadows off.
+        shortcuts_suspended: AtomicBool,
         monitor_started: AtomicBool,
     }
 
@@ -183,12 +279,11 @@ mod imp {
             Self {
                 enabled: AtomicBool::new(false),
                 sustained: AtomicBool::new(false),
-                enabled_since: Mutex::new(None),
                 culprit: Mutex::new(None),
                 fallback: Mutex::new(FallbackState::default()),
                 fallback_operation: Mutex::new(()),
-                recorder_blocked: AtomicBool::new(false),
                 cancel_requested: AtomicBool::new(false),
+                shortcuts_suspended: AtomicBool::new(false),
                 monitor_started: AtomicBool::new(false),
             }
         }
@@ -197,12 +292,13 @@ mod imp {
             self.sustained.load(Ordering::SeqCst)
         }
 
-        /// User-visible impact exists: some binding is degraded or dead, or
-        /// the user ran into the blocked shortcut recorder.
+        fn is_observed_enabled(&self) -> bool {
+            self.enabled.load(Ordering::SeqCst)
+        }
+
+        /// User-visible impact exists: secure input is sustained and some
+        /// binding is degraded or dead. Released secure input never warns.
         pub fn warning_active(&self) -> bool {
-            if self.recorder_blocked.load(Ordering::SeqCst) {
-                return true;
-            }
             if !self.is_sustained() {
                 return false;
             }
@@ -265,16 +361,15 @@ mod imp {
             covered_bindings: fallback.covered.clone(),
             degraded_bindings: fallback.degraded.clone(),
             uncovered_bindings: fallback.uncovered.clone(),
-            recorder_blocked: state.recorder_blocked.load(Ordering::SeqCst),
         }
     }
 
-    pub fn note_recorder_blocked(app: &AppHandle) {
+    pub fn set_shortcuts_suspended(app: &AppHandle, suspended: bool) {
         let state = app.state::<SecureInputState>();
-        if !state.recorder_blocked.swap(true, Ordering::SeqCst) {
-            warn!("SecureInput: shortcut recording attempt blocked — surfacing warning");
-            refresh_tray(app);
-            emit_status(app);
+        let was = state.shortcuts_suspended.swap(suspended, Ordering::SeqCst);
+        // Only an armed fallback has shadows to drop or restore.
+        if was != suspended && state.is_observed_enabled() {
+            reconcile_fallback(app);
         }
     }
 
@@ -300,13 +395,13 @@ mod imp {
         let app = app.clone();
         std::thread::spawn(move || {
             info!("secure-input monitor started");
+            let mut tracker = EpisodeTracker::default();
             loop {
                 std::thread::sleep(POLL_INTERVAL);
                 let state = app.state::<SecureInputState>();
-                let now_enabled = is_enabled();
-                let was_enabled = state.enabled.swap(now_enabled, Ordering::SeqCst);
+                let step = tracker.observe(is_enabled(), Instant::now());
 
-                if now_enabled && !was_enabled {
+                if step.became_enabled {
                     let culprit = lookup_culprit();
                     match &culprit {
                         Some(c) => {
@@ -314,46 +409,33 @@ mod imp {
                         }
                         None => info!("SecureInput ENABLED (no visible holder)"),
                     }
-                    *state.enabled_since.lock().unwrap() = Some(Instant::now());
                     *state.culprit.lock().unwrap() = culprit;
+                    state.enabled.store(true, Ordering::SeqCst);
+                    // Arm the fallback right away: the event tap is already
+                    // blind to KeyDown, so waiting would leave keyed
+                    // dictation shortcuts dead for the threshold.
+                    reconcile_fallback(&app);
                 }
 
-                if !now_enabled {
-                    // Clear recorder impact on every disabled sample. A short
-                    // Secure Input episode can otherwise occur entirely
-                    // between polls and leave this flag latched indefinitely.
-                    let was_blocked = state.recorder_blocked.swap(false, Ordering::SeqCst);
-                    if was_enabled {
-                        info!("SecureInput DISABLED");
-                        *state.enabled_since.lock().unwrap() = None;
-                        *state.culprit.lock().unwrap() = None;
-                    }
-
-                    if state.sustained.swap(false, Ordering::SeqCst) {
-                        reconcile_fallback(&app);
-                    } else if was_enabled || was_blocked {
-                        refresh_tray(&app);
-                        emit_status(&app);
-                    }
-                    continue;
+                if step.became_sustained {
+                    warn!(
+                        "SecureInput held for {}s — keyed shortcuts rely on the Carbon fallback",
+                        SUSTAIN_THRESHOLD.as_secs()
+                    );
+                    state.sustained.store(true, Ordering::SeqCst);
+                    // Retries any shadow that failed to register and
+                    // publishes the (now user-visible) warning state.
+                    reconcile_fallback(&app);
                 }
 
-                // Promote to "sustained" after the threshold.
-                if !state.sustained.load(Ordering::SeqCst) {
-                    let held_long_enough = state
-                        .enabled_since
-                        .lock()
-                        .unwrap()
-                        .map(|t| t.elapsed() >= SUSTAIN_THRESHOLD)
-                        .unwrap_or(false);
-                    if held_long_enough {
-                        warn!(
-                            "SecureInput held for {}s — keyed shortcuts are blocked; activating fallback",
-                            SUSTAIN_THRESHOLD.as_secs()
-                        );
-                        state.sustained.store(true, Ordering::SeqCst);
-                        reconcile_fallback(&app);
-                    }
+                if step.became_disabled {
+                    info!("SecureInput DISABLED");
+                    *state.culprit.lock().unwrap() = None;
+                    state.enabled.store(false, Ordering::SeqCst);
+                    state.sustained.store(false, Ordering::SeqCst);
+                    // Drops every shadow and emits the cleared status, so the
+                    // banner and tray badge go away on release.
+                    reconcile_fallback(&app);
                 }
             }
         });
@@ -393,7 +475,7 @@ mod imp {
     }
 
     /// Desired fallback for one binding, computed without plugin calls.
-    enum ShadowPlan {
+    pub(super) enum ShadowPlan {
         /// Modifier-only or mouse-based; unaffected by secure input.
         Immune,
         /// Cannot be represented through Carbon.
@@ -405,7 +487,7 @@ mod imp {
         },
     }
 
-    fn plan_fallback_binding(id: &str, binding: &ShortcutBinding) -> ShadowPlan {
+    pub(super) fn plan_fallback_binding(id: &str, binding: &ShortcutBinding) -> ShadowPlan {
         let Ok(hotkey) = binding.current_binding.parse::<handy_keys::Hotkey>() else {
             warn!(
                 "SecureInput fallback: '{}' has unparseable binding '{}', skipping",
@@ -466,31 +548,27 @@ mod imp {
         };
 
         let settings = settings::get_settings(app);
-        let eligible = state.is_sustained()
+        let eligible = state.is_observed_enabled()
             && app
                 .try_state::<crate::commands::ShortcutsInitialized>()
                 .is_some()
             && settings.keyboard_implementation == KeyboardImplementation::HandyKeys;
+        let ctx = FallbackContext {
+            armed: eligible,
+            suspended: state.shortcuts_suspended.load(Ordering::SeqCst),
+            cancel_requested: state.cancel_requested.load(Ordering::SeqCst),
+            post_process_enabled: settings.post_process_enabled,
+        };
 
         let mut next = FallbackState::default();
         let mut immune = 0usize;
         let mut wanted: Vec<(String, ShortcutBinding, bool)> = Vec::new();
-        if eligible {
-            for (id, binding) in &settings.bindings {
-                if id == "cancel" && !state.cancel_requested.load(Ordering::SeqCst) {
-                    continue;
-                }
-                if id == "transcribe_with_post_process" && !settings.post_process_enabled {
-                    continue;
-                }
-
-                match plan_fallback_binding(id, binding) {
-                    ShadowPlan::Immune => immune += 1,
-                    ShadowPlan::Uncovered => next.uncovered.push(id.clone()),
-                    ShadowPlan::Shadow { shadow, degraded } => {
-                        wanted.push((id.clone(), shadow, degraded))
-                    }
-                }
+        for id in fallback_candidates(&settings.bindings, ctx) {
+            let binding = &settings.bindings[&id];
+            match plan_fallback_binding(&id, binding) {
+                ShadowPlan::Immune => immune += 1,
+                ShadowPlan::Uncovered => next.uncovered.push(id),
+                ShadowPlan::Shadow { shadow, degraded } => wanted.push((id, shadow, degraded)),
             }
         }
 
@@ -564,14 +642,19 @@ mod imp {
 
         if eligible {
             info!(
-                "SecureInput fallback active: {} covered, {} degraded, {} uncovered, {} immune (user impact: {})",
+                "SecureInput fallback active: {} covered, {} degraded, {} uncovered, {} immune{} (user impact: {})",
                 next.covered.len(),
                 next.degraded.len(),
                 next.uncovered.len(),
                 immune,
+                if ctx.suspended {
+                    ", suspended while recording a shortcut"
+                } else {
+                    ""
+                },
                 !next.degraded.is_empty() || !next.uncovered.is_empty()
             );
-        } else if state.is_sustained()
+        } else if state.is_observed_enabled()
             && app
                 .try_state::<crate::commands::ShortcutsInitialized>()
                 .is_none()
@@ -599,11 +682,11 @@ mod imp {
     pub fn register_cancel_fallback(app: &AppHandle) {
         let state = app.state::<SecureInputState>();
         state.cancel_requested.store(true, Ordering::SeqCst);
-        // Without sustained Secure Input there are no Carbon shadows to
-        // update. The monitor performs reconciliation when sustained mode is
-        // entered or left, so spawning here would only race the normal tray
-        // state transition for every recording start.
-        if state.is_sustained() {
+        // Without observed Secure Input there are no Carbon shadows to
+        // update. The monitor performs reconciliation when secure input is
+        // observed or released, so spawning here would only race the normal
+        // tray state transition for every recording start.
+        if state.is_observed_enabled() {
             schedule_reconcile(app);
         }
     }
@@ -611,7 +694,7 @@ mod imp {
     pub fn unregister_cancel_fallback(app: &AppHandle) {
         let state = app.state::<SecureInputState>();
         state.cancel_requested.store(false, Ordering::SeqCst);
-        if state.is_sustained() {
+        if state.is_observed_enabled() {
             schedule_reconcile(app);
         }
     }
@@ -696,11 +779,10 @@ mod imp {
             covered_bindings: Vec::new(),
             degraded_bindings: Vec::new(),
             uncovered_bindings: Vec::new(),
-            recorder_blocked: false,
         }
     }
 
-    pub fn note_recorder_blocked(_app: &AppHandle) {}
+    pub fn set_shortcuts_suspended(_app: &AppHandle, _suspended: bool) {}
 
     pub fn register_cancel_fallback(_app: &AppHandle) {}
 
@@ -710,5 +792,152 @@ mod imp {
 
     pub async fn run_diagnostic(_duration_secs: u32) -> Result<KeyboardDiagnosticReport, String> {
         Err("The keyboard diagnostic is only supported on macOS".to_string())
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::imp::*;
+    use crate::settings::ShortcutBinding;
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+
+    fn binding(id: &str, current: &str) -> ShortcutBinding {
+        ShortcutBinding {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: String::new(),
+            default_binding: current.to_string(),
+            current_binding: current.to_string(),
+        }
+    }
+
+    /// The user's bindings from the reported log.
+    fn user_bindings() -> HashMap<String, ShortcutBinding> {
+        [
+            binding("transcribe", "option+space"),
+            binding("transcribe_with_post_process", "option+shift+space"),
+            binding("cancel", "escape"),
+        ]
+        .into_iter()
+        .map(|b| (b.id.clone(), b))
+        .collect()
+    }
+
+    fn ctx() -> FallbackContext {
+        FallbackContext {
+            armed: true,
+            suspended: false,
+            cancel_requested: false,
+            post_process_enabled: true,
+        }
+    }
+
+    /// Chrome episode from the log: enabled, held, released, enabled again.
+    #[test]
+    fn fallback_arms_on_the_first_enabled_sample_and_warns_only_after_the_threshold() {
+        let t0 = Instant::now();
+        let at = |s: u64| t0 + Duration::from_secs(s);
+        let mut tracker = EpisodeTracker::default();
+
+        assert_eq!(tracker.observe(false, at(0)), EpisodeStep::default());
+
+        let first = tracker.observe(true, at(1));
+        assert!(first.became_enabled, "fallback must arm without delay");
+        assert!(!first.became_sustained);
+
+        assert_eq!(tracker.observe(true, at(2)), EpisodeStep::default());
+        assert_eq!(tracker.observe(true, at(3)), EpisodeStep::default());
+        let sustained = tracker.observe(true, at(4));
+        assert!(sustained.became_sustained, "warning gate opens at 3 s");
+        assert!(!sustained.became_enabled);
+        // Long holds (Chrome kept it for minutes) do not re-fire transitions.
+        assert_eq!(tracker.observe(true, at(200)), EpisodeStep::default());
+
+        let released = tracker.observe(false, at(201));
+        assert!(released.became_disabled, "release must clear the warning");
+        assert_eq!(tracker.observe(false, at(202)), EpisodeStep::default());
+
+        // The next episode starts fresh: re-armed at once, re-warned only
+        // after another full threshold.
+        assert!(tracker.observe(true, at(203)).became_enabled);
+        assert_eq!(tracker.observe(true, at(205)), EpisodeStep::default());
+        assert!(tracker.observe(true, at(206)).became_sustained);
+    }
+
+    #[test]
+    fn short_episode_released_before_the_threshold_never_warns() {
+        let t0 = Instant::now();
+        let mut tracker = EpisodeTracker::default();
+        assert!(tracker.observe(true, t0).became_enabled);
+        let step = tracker.observe(false, t0 + Duration::from_secs(2));
+        assert!(step.became_disabled);
+        assert!(!step.became_sustained);
+    }
+
+    #[test]
+    fn both_transcribe_bindings_are_shadowed_while_armed() {
+        let ids = fallback_candidates(&user_bindings(), ctx());
+        assert_eq!(ids, vec!["transcribe", "transcribe_with_post_process"]);
+        for id in &ids {
+            match plan_fallback_binding(id, &user_bindings()[id]) {
+                ShadowPlan::Shadow { shadow, degraded } => {
+                    assert!(!degraded, "{id} keeps identical semantics");
+                    assert_eq!(shadow.current_binding, user_bindings()[id].current_binding);
+                }
+                _ => panic!("{id} should be shadowed through Carbon"),
+            }
+        }
+    }
+
+    #[test]
+    fn nothing_is_shadowed_before_secure_input_is_observed() {
+        let ids = fallback_candidates(
+            &user_bindings(),
+            FallbackContext {
+                armed: false,
+                cancel_requested: true,
+                ..ctx()
+            },
+        );
+        assert!(ids.is_empty());
+    }
+
+    /// Recording a shortcut from the settings window while Chrome holds
+    /// Secure Input: a live Carbon `option+space` would start dictation and
+    /// swallow the very keys being recorded.
+    #[test]
+    fn recording_a_shortcut_drops_the_transcribe_shadows() {
+        let ids = fallback_candidates(
+            &user_bindings(),
+            FallbackContext {
+                suspended: true,
+                ..ctx()
+            },
+        );
+        assert!(ids.is_empty());
+
+        // Cancel follows the audio-recording lifecycle, not the recorder.
+        let ids = fallback_candidates(
+            &user_bindings(),
+            FallbackContext {
+                suspended: true,
+                cancel_requested: true,
+                ..ctx()
+            },
+        );
+        assert_eq!(ids, vec!["cancel"]);
+    }
+
+    #[test]
+    fn post_process_shadow_follows_the_feature_toggle() {
+        let ids = fallback_candidates(
+            &user_bindings(),
+            FallbackContext {
+                post_process_enabled: false,
+                ..ctx()
+            },
+        );
+        assert_eq!(ids, vec!["transcribe"]);
     }
 }

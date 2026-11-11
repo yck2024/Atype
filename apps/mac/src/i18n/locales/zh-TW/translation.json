@@ -168,6 +168,8 @@
         "none": "未設定快捷鍵",
         "notFound": "未找到快捷鍵",
         "pressKeys": "請按鍵...",
+        "secureInputCapture": "macOS 的 Secure Input 目前開著，Atype 改從這個視窗錄製。請按一組快捷鍵，例如 Option + Space。Secure Input 解除前，無法錄製只有修飾鍵或含 fn 的快捷鍵。",
+        "secureInputCaptureWithCulprit": "{{name}} 正在使用 macOS 的 Secure Input，Atype 改從這個視窗錄製。請按一組快捷鍵，例如 Option + Space。它解除前，無法錄製只有修飾鍵或含 fn 的快捷鍵。",
         "bindings": {
           "transcribe": {
             "name": "轉錄快捷鍵",
@@ -812,10 +814,15 @@
     "blockedWithCulprit_other": "{{name}} 可能正在阻擋 {{count}} 個快捷鍵",
     "blockedNoCulprit_one": "macOS 正在暫時阻擋 1 個快捷鍵",
     "blockedNoCulprit_other": "macOS 正在暫時阻擋 {{count}} 個快捷鍵",
-    "recorderBlockedWithCulprit": "{{name}} 可能正在阻擋快捷鍵變更",
-    "recorderBlockedNoCulprit": "macOS 正在暫時阻擋快捷鍵變更",
     "learnMore": "如何解決",
-    "recorderBlocked": "目前無法錄製快捷鍵——macOS 的 Secure Input 正在阻擋按鍵事件。請先解決 Secure Input 警告。",
+    "fix": {
+      "leavePasswordFieldWithCulprit": "在 {{name}} 裡點一下密碼欄以外的地方，或切到沒有選取密碼欄的分頁。",
+      "reopenWithCulprit": "警告還在的話，完全結束 {{name}} 再重新打開。",
+      "leavePasswordField": "在有密碼欄被選取的 App（例如 Chrome）裡點一下密碼欄以外的地方，或切到別的分頁。終端機的「安全鍵盤輸入」也會造成這個狀況。",
+      "reopen": "警告還在的話，結束顯示密碼欄的那個 App 再重新打開。",
+      "lockScreen": "還是卡住？鎖定 Mac（Control + Command + Q）再解鎖，就能清掉卡住的 Secure Input。",
+      "noRestart": "不需要重開 Atype 或 Mac：Secure Input 一解除，這個警告會在一秒內自動消失。"
+    },
     "dismiss": "關閉"
   }
 }

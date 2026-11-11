@@ -1239,13 +1239,7 @@ degraded_bindings: string[];
 /**
  * Binding ids that cannot fire at all (e.g. fn+key, registration failure)
  */
-uncovered_bindings: string[]; 
-/**
- * The user tried to record a shortcut while secure input was active.
- * Treated as user impact even when every binding is covered, so the
- * warning banner appears and explains why recording refused.
- */
-recorder_blocked: boolean }
+uncovered_bindings: string[] }
 /**
  * How the transcribe shortcut's key events drive a recording.
  */

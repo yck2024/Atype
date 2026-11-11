@@ -473,6 +473,20 @@ pub fn unregister_shortcut(app: &AppHandle, binding: ShortcutBinding) -> Result<
     state.unregister(&binding)
 }
 
+/// Marker the frontend matches to switch to window-event capture.
+pub const SECURE_INPUT_ACTIVE: &str = "secure-input-active";
+
+/// Whether the event-tap recorder can see keyed shortcuts. A pure decision
+/// with no side effects: refusing must not raise a warning, because the
+/// settings window can still record from its own key events.
+fn tap_recording_allowed(secure_input_enabled: bool) -> Result<(), String> {
+    if secure_input_enabled {
+        Err(SECURE_INPUT_ACTIVE.into())
+    } else {
+        Ok(())
+    }
+}
+
 /// Start key recording mode
 #[tauri::command]
 #[specta::specta]
@@ -484,13 +498,10 @@ pub fn start_handy_keys_recording(app: AppHandle, binding_id: String) -> Result<
 
     // While Secure Input is active the tap receives no KeyDown/KeyUp, so the
     // recorder would silently capture just the modifier and overwrite the
-    // binding with it (issue #1578). Refuse instead; the frontend maps this
-    // marker to a localized explanation, and the noted impact makes the
-    // warning banner appear with the full story.
-    if crate::secure_input::is_enabled_now() {
-        crate::secure_input::note_recorder_blocked(&app);
-        return Err("secure-input-active".into());
-    }
+    // binding with it (issue #1578). Refuse the tap-based recorder; the
+    // frontend treats this marker as "record from the settings window's own
+    // key events", which Secure Input held by another app does not block.
+    tap_recording_allowed(crate::secure_input::is_enabled_now())?;
 
     let state = app
         .try_state::<HandyKeysState>()
@@ -526,4 +537,70 @@ pub fn stop_handy_keys_recording(app: AppHandle) -> Result<(), String> {
     let result = state.stop_recording();
     super::resume_all_shortcuts(&app);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tap_recorder_refuses_with_the_frontend_marker_under_secure_input() {
+        assert_eq!(
+            tap_recording_allowed(true),
+            Err("secure-input-active".to_string())
+        );
+        assert_eq!(tap_recording_allowed(false), Ok(()));
+    }
+
+    /// Strings the settings window's window-event recorder
+    /// (`src/lib/utils/windowShortcutCapture.ts`) can produce must parse as
+    /// handy-keys hotkeys with a main key, and keep their key on a
+    /// round-trip, or the committed binding would not register.
+    #[test]
+    fn window_capture_strings_parse_as_keyed_hotkeys() {
+        for raw in [
+            "option+space",
+            "option+shift+space",
+            "ctrl+option+shift+command+k",
+            "command+return",
+            "ctrl+escape",
+            "escape",
+            "f5",
+            "f19",
+            "option+delete",
+            "option+forwarddelete",
+            "shift+left",
+            "ctrl+pageup",
+            "option+-",
+            "option+=",
+            "option+[",
+            "option+]",
+            "option+\\",
+            "option+;",
+            "option+'",
+            "option+,",
+            "option+.",
+            "option+/",
+            "option+`",
+            "ctrl+keypad0",
+            "ctrl+keypaddecimal",
+            "ctrl+keypadmultiply",
+            "ctrl+keypadplus",
+            "ctrl+keypadminus",
+            "ctrl+keypaddivide",
+            "ctrl+keypadenter",
+            "ctrl+keypadequals",
+            "ctrl+keypadclear",
+            "ctrl+§",
+            "kana",
+            "eisu",
+        ] {
+            let hotkey: Hotkey = raw
+                .parse()
+                .unwrap_or_else(|e| panic!("{raw} should parse: {e}"));
+            assert!(hotkey.key.is_some(), "{raw} should carry a main key");
+            let again: Hotkey = hotkey.to_handy_string().parse().unwrap();
+            assert_eq!(again, hotkey, "{raw} should round-trip");
+        }
+    }
 }
