@@ -281,8 +281,9 @@ pub fn reset_binding(app: AppHandle, id: String) -> Result<BindingResponse, Stri
 /// Unregister every binding while the user is recording a new shortcut in
 /// the UI, so no existing shortcut can fire — or swallow the keystrokes —
 /// mid-capture. The "cancel" binding is untouched: it is managed dynamically
-/// by the recording lifecycle.
+/// by the recording lifecycle. Secure Input's Carbon shadows are dropped too.
 pub fn suspend_all_shortcuts(app: &AppHandle) {
+    crate::secure_input::set_shortcuts_suspended(app, true);
     for (id, binding) in settings::get_bindings(app) {
         if id == "cancel" {
             continue;
@@ -312,6 +313,7 @@ pub fn resume_all_shortcuts(app: &AppHandle) {
             debug!("resume_all_shortcuts: could not register '{}': {}", id, e);
         }
     }
+    crate::secure_input::set_shortcuts_suspended(app, false);
 }
 
 /// Temporarily unregister all bindings while the user is recording a

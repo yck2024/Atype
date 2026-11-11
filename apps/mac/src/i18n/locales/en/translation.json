@@ -168,6 +168,8 @@
         "none": "No shortcuts configured",
         "notFound": "Shortcut not found",
         "pressKeys": "Press keys...",
+        "secureInputCapture": "macOS Secure Input is on, so Atype is recording from this window. Press a combination such as Option + Space. Modifier-only and fn shortcuts can't be recorded until Secure Input is released.",
+        "secureInputCaptureWithCulprit": "{{name}} is holding macOS Secure Input, so Atype is recording from this window. Press a combination such as Option + Space. Modifier-only and fn shortcuts can't be recorded until it is released.",
         "bindings": {
           "transcribe": {
             "name": "Transcribe Shortcut",
@@ -812,10 +814,15 @@
     "blockedWithCulprit_other": "{{name}} may be blocking {{count}} shortcuts",
     "blockedNoCulprit_one": "macOS is temporarily blocking 1 shortcut",
     "blockedNoCulprit_other": "macOS is temporarily blocking {{count}} shortcuts",
-    "recorderBlockedWithCulprit": "{{name}} may be blocking shortcut changes",
-    "recorderBlockedNoCulprit": "macOS is temporarily blocking shortcut changes",
     "learnMore": "How to fix",
-    "recorderBlocked": "Can't record shortcuts right now — macOS Secure Input is blocking key events. Resolve the Secure Input warning first.",
+    "fix": {
+      "leavePasswordFieldWithCulprit": "In {{name}}, click outside the password field, or switch to a tab where no password field is focused.",
+      "reopenWithCulprit": "If the warning stays, quit {{name}} completely and open it again.",
+      "leavePasswordField": "Click outside any focused password field (for example in Chrome), or switch away from that tab. Terminal's Secure Keyboard Entry also causes this.",
+      "reopen": "If the warning stays, quit the app that showed the password field and open it again.",
+      "lockScreen": "Still stuck? Lock the Mac (Control + Command + Q) and unlock it; this clears a stuck Secure Input holder.",
+      "noRestart": "No need to restart Atype or the Mac: this warning goes away within a second of Secure Input being released."
+    },
     "dismiss": "Dismiss"
   }
 }

@@ -15,6 +15,7 @@
     "format:frontend": "prettier --write .",
     "format:backend": "cd src-tauri && cargo fmt",
     "test:keyboard": "bun src/lib/utils/keyboard.test.ts",
+    "test:shortcut-capture": "bun src/lib/utils/windowShortcutCapture.test.ts",
     "app:install": "bash scripts/install-mac.sh",
     "app:package": "bash scripts/package-mac.sh",
     "icon:set": "bash scripts/set-icon.sh",

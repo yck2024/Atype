@@ -2,14 +2,17 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { formatKeyCombination } from "../../lib/utils/keyboard";
+import {
+  isSecureInputRefusal,
+  WindowShortcutCapture,
+  type WindowCaptureAction,
+} from "../../lib/utils/windowShortcutCapture";
 import { ResetButton } from "../ui/ResetButton";
 import { SettingContainer } from "../ui/SettingContainer";
 import { useSettings } from "../../hooks/useSettings";
 import { useOsType } from "../../hooks/useOsType";
 import { commands } from "@/bindings";
 import { toast } from "sonner";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { SECURE_INPUT_HELP_URL } from "../SecureInputWarning";
 
 interface HandyKeysShortcutInputProps {
   descriptionMode?: "inline" | "tooltip";
@@ -25,6 +28,15 @@ interface HandyKeysEvent {
   hotkey_string: string;
 }
 
+/**
+ * "tap": the backend's global event tap (sees modifier-only and fn combos).
+ * "window": this window's own key events, used while another app holds
+ * macOS Secure Input and the tap is blind to key presses.
+ */
+type CaptureMode = "tap" | "window";
+
+let activeCaptureOwner: object | null = null;
+
 export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
   descriptionMode = "tooltip",
   grouped = false,
@@ -35,10 +47,22 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
   const { getSetting, updateBinding, resetBinding, isUpdating, isLoading } =
     useSettings();
   const [isRecording, setIsRecording] = useState(false);
+  const [captureMode, setCaptureMode] = useState<CaptureMode>("tap");
+  // App holding Secure Input, shown in the window-capture hint
+  const [secureInputHolder, setSecureInputHolder] = useState<string | null>(
+    null,
+  );
   const [currentKeys, setCurrentKeys] = useState<string>("");
   const [originalBinding, setOriginalBinding] = useState<string>("");
   const shortcutRef = useRef<HTMLDivElement | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
+  // Mirrors isRecording for unmount cleanup
+  const recordingRef = useRef(false);
+  // One start attempt at a time: a double click used to fire two refused
+  // attempts and stack two identical toasts.
+  const startingRef = useRef(false);
+  const captureOwnerRef = useRef<object>({});
+  const mountedRef = useRef(true);
   // Use a ref to track currentKeys for the event handler (avoids stale closure)
   const currentKeysRef = useRef<string>("");
   // Track keyed vs modifier-only captures separately so a combo commits only
@@ -52,18 +76,46 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
 
   const bindings = getSetting("bindings") || {};
 
-  // Handle cancellation
-  const cancelRecording = useCallback(async () => {
-    if (!isRecording) return;
+  const releaseCaptureOwner = useCallback(() => {
+    if (activeCaptureOwner === captureOwnerRef.current) {
+      activeCaptureOwner = null;
+    }
+  }, []);
 
-    // Stop listening for backend events
+  const resetCaptureRefs = useCallback(() => {
+    currentKeysRef.current = "";
+    keyedShortcutRef.current = "";
+    modifierOnlyShortcutRef.current = "";
+  }, []);
+
+  const stopListening = useCallback(() => {
     if (unlistenRef.current) {
       unlistenRef.current();
       unlistenRef.current = null;
     }
+  }, []);
 
-    // Stop backend recording
+  // Stop the backend recorder (if any) and re-register every shortcut,
+  // including Secure Input's Carbon shadows, then leave recording mode.
+  const finishRecording = useCallback(async () => {
+    stopListening();
     await commands.stopHandyKeysRecording().catch(console.error);
+    recordingRef.current = false;
+    setIsRecording(false);
+    setCaptureMode("tap");
+    setSecureInputHolder(null);
+    setCurrentKeys("");
+    resetCaptureRefs();
+    setOriginalBinding("");
+    releaseCaptureOwner();
+  }, [stopListening, resetCaptureRefs, releaseCaptureOwner]);
+
+  // Handle cancellation
+  const cancelRecording = useCallback(async () => {
+    if (!isRecording) return;
+
+    // Stop listening for key events; finishRecording stops the backend
+    stopListening();
 
     // Restore original binding
     if (originalBinding) {
@@ -75,58 +127,73 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
       }
     }
 
-    setIsRecording(false);
-    setCurrentKeys("");
-    currentKeysRef.current = "";
-    keyedShortcutRef.current = "";
-    modifierOnlyShortcutRef.current = "";
-    setOriginalBinding("");
-  }, [isRecording, originalBinding, shortcutId, updateBinding, t]);
+    await finishRecording();
+  }, [
+    isRecording,
+    originalBinding,
+    shortcutId,
+    updateBinding,
+    t,
+    stopListening,
+    finishRecording,
+  ]);
 
-  // Set up event listener for handy-keys events
+  const commitAndStop = useCallback(
+    async (keysToCommit: string) => {
+      try {
+        await updateBinding(shortcutId, keysToCommit);
+      } catch (error) {
+        console.error("Failed to change binding:", error);
+        toast.error(
+          t("settings.general.shortcut.errors.set", {
+            error: String(error),
+          }),
+        );
+
+        // Reset to original binding on error
+        if (originalBinding) {
+          try {
+            await updateBinding(shortcutId, originalBinding);
+          } catch (resetError) {
+            console.error("Failed to reset binding:", resetError);
+            toast.error(t("settings.general.shortcut.errors.reset"));
+          }
+        }
+      }
+
+      await finishRecording();
+    },
+    [shortcutId, originalBinding, updateBinding, t, finishRecording],
+  );
+
+  // Event handlers read the latest callback through a ref, so a re-render
+  // never tears down a capture that is half-way through a combination.
+  const commitRef = useRef(commitAndStop);
+  commitRef.current = commitAndStop;
+
+  // Record from this window's own key events (Secure Input fallback).
+  const enterWindowCapture = useCallback(async () => {
+    stopListening();
+    resetCaptureRefs();
+    setCurrentKeys("");
+    setCaptureMode("window");
+    recordingRef.current = true;
+    setIsRecording(true);
+    try {
+      const status = await commands.getSecureInputStatus();
+      setSecureInputHolder(status.culprit_name);
+    } catch (e) {
+      console.warn("Failed to fetch secure input status:", e);
+    }
+  }, [stopListening, resetCaptureRefs]);
+
+  // Event-tap capture: key events come from the backend listener
   useEffect(() => {
-    if (!isRecording) return;
+    if (!isRecording || captureMode !== "tap") return;
 
     let cleanup = false;
 
     const setupListener = async () => {
-      // Listen for key events from backend
-      const commitAndStop = async (keysToCommit: string) => {
-        try {
-          await updateBinding(shortcutId, keysToCommit);
-        } catch (error) {
-          console.error("Failed to change binding:", error);
-          toast.error(
-            t("settings.general.shortcut.errors.set", {
-              error: String(error),
-            }),
-          );
-
-          // Reset to original binding on error
-          if (originalBinding) {
-            try {
-              await updateBinding(shortcutId, originalBinding);
-            } catch (resetError) {
-              console.error("Failed to reset binding:", resetError);
-              toast.error(t("settings.general.shortcut.errors.reset"));
-            }
-          }
-        }
-
-        // Stop recording
-        if (unlistenRef.current) {
-          unlistenRef.current();
-          unlistenRef.current = null;
-        }
-        await commands.stopHandyKeysRecording().catch(console.error);
-        setIsRecording(false);
-        setCurrentKeys("");
-        currentKeysRef.current = "";
-        keyedShortcutRef.current = "";
-        modifierOnlyShortcutRef.current = "";
-        setOriginalBinding("");
-      };
-
       const unlisten = await listen<HandyKeysEvent>(
         "handy-keys-event",
         async (event) => {
@@ -151,7 +218,8 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
             // silently overwritten with just the modifier (issue #1578).
             const keysToCommit = keyedShortcutRef.current || hotkey_string;
             if (keysToCommit) {
-              await commitAndStop(keysToCommit);
+              cleanup = true;
+              await commitRef.current(keysToCommit);
             }
           } else if (
             !is_key_down &&
@@ -160,35 +228,91 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
             !keyedShortcutRef.current &&
             modifierOnlyShortcutRef.current
           ) {
+            const modifierOnly = modifierOnlyShortcutRef.current;
+            cleanup = true;
+            // If Secure Input switched on mid-capture, the tap only saw the
+            // modifier of a keyed combo. Keep recording from the window
+            // instead of saving just the modifier.
+            const status = await commands
+              .getSecureInputStatus()
+              .catch(() => null);
+            if (status?.enabled) {
+              await enterWindowCapture();
+              return;
+            }
             // Every modifier released without a main key ever going down —
             // commit as a modifier-only shortcut
-            await commitAndStop(modifierOnlyShortcutRef.current);
+            await commitRef.current(modifierOnly);
           }
         },
       );
 
-      unlistenRef.current = unlisten;
+      if (cleanup) {
+        unlisten();
+      } else {
+        unlistenRef.current = unlisten;
+      }
     };
 
     setupListener();
 
     return () => {
       cleanup = true;
-      if (unlistenRef.current) {
-        unlistenRef.current();
-        unlistenRef.current = null;
-      }
-      // Stop backend recording on unmount to prevent orphaned recording loops
-      commands.stopHandyKeysRecording().catch(console.error);
+      stopListening();
     };
-  }, [
-    isRecording,
-    shortcutId,
-    originalBinding,
-    updateBinding,
-    cancelRecording,
-    t,
-  ]);
+  }, [isRecording, captureMode, enterWindowCapture, stopListening]);
+
+  // Window capture: key events come from this window while the backend's
+  // tap is blind (another app holds macOS Secure Input).
+  useEffect(() => {
+    if (!isRecording || captureMode !== "window") return;
+
+    const capture = new WindowShortcutCapture();
+    let committed = false;
+
+    const apply = (action: WindowCaptureAction) => {
+      if (committed) return;
+      if (action.type === "preview") {
+        setCurrentKeys(action.hotkey);
+      } else if (action.type === "commit") {
+        committed = true;
+        void commitRef.current(action.hotkey);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      apply(capture.keyDown(e));
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      apply(capture.keyUp(e));
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+    };
+  }, [isRecording, captureMode]);
+
+  // Stop backend recording on unmount to prevent orphaned recording loops
+  // and leave every shortcut registered.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      stopListening();
+      if (recordingRef.current) {
+        commands.stopHandyKeysRecording().catch(console.error);
+        releaseCaptureOwner();
+      } else if (!startingRef.current) {
+        releaseCaptureOwner();
+      }
+    };
+  }, [stopListening, releaseCaptureOwner]);
 
   // Handle click outside
   useEffect(() => {
@@ -209,25 +333,40 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
 
   // Start recording a new shortcut
   const startRecording = async () => {
-    if (isRecording) return;
+    if (
+      isRecording ||
+      startingRef.current ||
+      (activeCaptureOwner !== null &&
+        activeCaptureOwner !== captureOwnerRef.current)
+    ) {
+      return;
+    }
+    activeCaptureOwner = captureOwnerRef.current;
+    startingRef.current = true;
 
     // Store the original binding to restore if canceled
     setOriginalBinding(bindings[shortcutId]?.current_binding || "");
 
-    // Start backend recording. The backend refuses while macOS Secure Input
-    // is active (the recorder's listener would receive no key events and
-    // capture just the modifier) — it also flips the warning banner on, so
-    // the toast points at a visible explanation.
     try {
       const result = await commands.startHandyKeysRecording(shortcutId);
+      if (
+        !mountedRef.current ||
+        activeCaptureOwner !== captureOwnerRef.current
+      ) {
+        if (result.status === "ok") {
+          await commands.stopHandyKeysRecording().catch(console.error);
+        }
+        releaseCaptureOwner();
+        return;
+      }
       if (result.status === "error") {
-        if (String(result.error).includes("secure-input-active")) {
-          toast.error(t("secureInput.recorderBlocked"), {
-            action: {
-              label: t("secureInput.learnMore"),
-              onClick: () => openUrl(SECURE_INPUT_HELP_URL),
-            },
-          });
+        if (isSecureInputRefusal(result.error)) {
+          // Another app holds macOS Secure Input, so the backend's event
+          // tap cannot see key presses. This window still receives its own
+          // key events: suspend every shortcut (Carbon shadows included, so
+          // none fires or swallows the keys) and record from here.
+          await commands.suspendAllBindings().catch(console.error);
+          await enterWindowCapture();
         } else {
           toast.error(
             t("settings.general.shortcut.errors.set", {
@@ -235,18 +374,22 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
             }),
           );
         }
+        releaseCaptureOwner();
         return;
       }
-      setIsRecording(true);
+      resetCaptureRefs();
       setCurrentKeys("");
-      currentKeysRef.current = "";
-      keyedShortcutRef.current = "";
-      modifierOnlyShortcutRef.current = "";
+      setCaptureMode("tap");
+      recordingRef.current = true;
+      setIsRecording(true);
     } catch (error) {
       console.error("Failed to start recording:", error);
       toast.error(
         t("settings.general.shortcut.errors.set", { error: String(error) }),
       );
+      releaseCaptureOwner();
+    } finally {
+      startingRef.current = false;
     }
   };
 
@@ -325,11 +468,25 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
     >
       <div className="flex items-center space-x-1">
         {isRecording ? (
-          <div
-            ref={shortcutRef}
-            className="px-2 py-1 text-sm font-semibold border border-logo-primary bg-logo-primary/30 rounded-md"
-          >
-            {formatCurrentKeys()}
+          <div ref={shortcutRef} className="flex flex-col items-end gap-1">
+            <div className="px-2 py-1 text-sm font-semibold border border-logo-primary bg-logo-primary/30 rounded-md">
+              {formatCurrentKeys()}
+            </div>
+            {captureMode === "window" && (
+              <p
+                role="status"
+                className="max-w-64 text-right text-xs leading-4 text-mid-gray"
+              >
+                {secureInputHolder
+                  ? t(
+                      "settings.general.shortcut.secureInputCaptureWithCulprit",
+                      {
+                        name: secureInputHolder,
+                      },
+                    )
+                  : t("settings.general.shortcut.secureInputCapture")}
+              </p>
+            )}
           </div>
         ) : (
           <div

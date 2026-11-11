@@ -1,27 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { ExternalLink, TriangleAlert, X } from "lucide-react";
+import { ChevronDown, TriangleAlert, X } from "lucide-react";
 import { commands, type SecureInputStatus } from "@/bindings";
-
-// Detailed remediation steps live in the docs rather than in the banner
-export const SECURE_INPUT_HELP_URL =
-  "https://handy.computer/docs/troubleshooting#shortcuts-stopped-working-on-macos-secure-input";
 
 /**
  * Compact warning banner shown while macOS Secure Input is stuck on.
  *
  * Secure Input (password fields, Terminal's "Secure Keyboard Entry", a stuck
- * loginwindow) blocks key events from reaching Handy's keyboard listener, so
- * keyed shortcuts silently stop firing (issue #1578). The backend monitor
- * emits `secure-input-changed` on state transitions; `sustained` filters out
- * the normal momentary activation from focusing a password field.
+ * loginwindow) blocks key events from reaching Atype's keyboard listener.
+ * The backend moves keyed shortcuts to a Carbon fallback as soon as it sees
+ * Secure Input, so this only appears when a shortcut is still affected
+ * (side-specific modifiers widened, or fn/unregistrable combos dead) and
+ * Secure Input has been held long enough (`sustained`) to not be a momentary
+ * password-field focus. It clears as soon as Secure Input is released.
  */
 const SecureInputWarning: React.FC = () => {
   const { t } = useTranslation();
   const [status, setStatus] = useState<SecureInputStatus | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const [showFix, setShowFix] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -43,16 +41,14 @@ const SecureInputWarning: React.FC = () => {
   }, [refresh]);
 
   // Only warn when the user is actually impacted: a binding is degraded
-  // (side-specific matching widened) or dead (e.g. fn+key), or they ran into
-  // the blocked shortcut recorder. When the fallback covers everything
-  // transparently — and nothing else surfaced — stay silent; the backend
+  // (side-specific matching widened) or dead (e.g. fn+key). When the
+  // fallback covers everything transparently stay silent; the backend
   // still logs.
   const impacted =
     status !== null &&
-    ((status.sustained &&
-      (status.degraded_bindings.length > 0 ||
-        status.uncovered_bindings.length > 0)) ||
-      status.recorder_blocked);
+    status.sustained &&
+    (status.degraded_bindings.length > 0 ||
+      status.uncovered_bindings.length > 0);
 
   // A dismissal lasts for the current episode only: once the condition
   // clears, the next occurrence warns again. The tray badge is the
@@ -60,6 +56,7 @@ const SecureInputWarning: React.FC = () => {
   useEffect(() => {
     if (!impacted) {
       setDismissed(false);
+      setShowFix(false);
     }
   }, [impacted]);
 
@@ -67,26 +64,34 @@ const SecureInputWarning: React.FC = () => {
     return null;
   }
 
+  const name = status.culprit_name;
   const affectedCount = new Set([
     ...status.uncovered_bindings,
     ...status.degraded_bindings,
   ]).size;
   const countSuffix = affectedCount === 1 ? "one" : "other";
   const message =
-    affectedCount > 0
-      ? status.culprit_name !== null
-        ? t(`secureInput.blockedWithCulprit_${countSuffix}`, {
-            name: status.culprit_name,
-            count: affectedCount,
-          })
-        : t(`secureInput.blockedNoCulprit_${countSuffix}`, {
-            count: affectedCount,
-          })
-      : status.culprit_name !== null
-        ? t("secureInput.recorderBlockedWithCulprit", {
-            name: status.culprit_name,
-          })
-        : t("secureInput.recorderBlockedNoCulprit");
+    name !== null
+      ? t(`secureInput.blockedWithCulprit_${countSuffix}`, {
+          name,
+          count: affectedCount,
+        })
+      : t(`secureInput.blockedNoCulprit_${countSuffix}`, {
+          count: affectedCount,
+        });
+
+  const steps =
+    name !== null
+      ? [
+          t("secureInput.fix.leavePasswordFieldWithCulprit", { name }),
+          t("secureInput.fix.reopenWithCulprit", { name }),
+          t("secureInput.fix.lockScreen"),
+        ]
+      : [
+          t("secureInput.fix.leavePasswordField"),
+          t("secureInput.fix.reopen"),
+          t("secureInput.fix.lockScreen"),
+        ];
 
   return (
     <div className="w-full rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5">
@@ -97,12 +102,15 @@ const SecureInputWarning: React.FC = () => {
         </p>
         <div className="flex shrink-0 items-center gap-1">
           <button
-            onClick={() => openUrl(SECURE_INPUT_HELP_URL)}
+            onClick={() => setShowFix((v) => !v)}
+            aria-expanded={showFix}
             className="cursor-pointer whitespace-nowrap rounded px-2 py-1.5 text-sm font-medium text-text hover:text-warning focus:outline-none focus:ring-1 focus:ring-warning"
           >
             <span className="flex items-center gap-1 border-b border-current leading-4">
               {t("secureInput.learnMore")}
-              <ExternalLink className="h-3.5 w-3.5" />
+              <ChevronDown
+                className={`h-3.5 w-3.5 transition-transform ${showFix ? "rotate-180" : ""}`}
+              />
             </span>
           </button>
           <button
@@ -114,6 +122,16 @@ const SecureInputWarning: React.FC = () => {
           </button>
         </div>
       </div>
+      {showFix && (
+        <div className="mt-2 pl-8 text-sm leading-5">
+          <ol className="list-decimal space-y-1 pl-4">
+            {steps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+          <p className="mt-2 text-mid-gray">{t("secureInput.fix.noRestart")}</p>
+        </div>
+      )}
     </div>
   );
 };

@@ -23,7 +23,7 @@ bun install
 bun run tauri dev                 # 開發；權限算在終端機身上
 bun run app:install               # 編 release 版並裝到 /Applications/Atype.app
 bun run build                     # 前端型別檢查與建置
-cd src-tauri && cargo test        # 314 個測試
+cd src-tauri && cargo test        # 328 個測試
 cargo run -- --polish "我们明天下午3:30开会"   # 直接看中文層輸出
 bun run icon:gen / icon:set       # 生圖示（CLIProxyAPI 的 gpt-image）/ 換圖示
 ```
