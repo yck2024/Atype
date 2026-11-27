@@ -191,7 +191,7 @@ impl HandyKeysState {
         binding_id: &str,
         hotkey_string: &str,
     ) -> Result<(), String> {
-        let hotkey: Hotkey = hotkey_string
+        let hotkey: Hotkey = crate::atype::hotkey::for_tap(hotkey_string)
             .parse()
             .map_err(|e| format!("Failed to parse hotkey '{}': {}", hotkey_string, e))?;
 
@@ -318,7 +318,7 @@ impl HandyKeysState {
                     is_key_down: key_event.is_key_down,
                     hotkey_string: key_event
                         .as_hotkey()
-                        .map(|h| h.to_handy_string())
+                        .map(|h| crate::atype::hotkey::canonical(&h.to_handy_string()))
                         .unwrap_or_default(),
                 };
 

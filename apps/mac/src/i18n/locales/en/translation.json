@@ -213,6 +213,7 @@
       }
     },
     "atype": {
+      "functionKeyHint": "If F1 changes the screen brightness instead, press fn + F1, or turn on \"Use F1, F2, etc. keys as standard function keys\" in System Settings → Keyboard → Keyboard Shortcuts… → Function Keys. You can also click the key above to pick another one.",
       "usage": {
         "title": "My Usage",
         "description": "Counted from your second brain",
@@ -699,7 +700,7 @@
         "title": "Keyboard Diagnostic",
         "description": "Checks whether keyboard events reach Atype. Only event counts are recorded — never which keys you press.",
         "run": "Run 10s diagnostic",
-        "running": "Listening… press your shortcut a few times (e.g. Option+Space)",
+        "running": "Listening… press your shortcut a few times (e.g. F1)",
         "secureInputLabel": "Secure Input",
         "enabled": "enabled",
         "disabled": "disabled",

@@ -13,7 +13,7 @@ use crate::settings::{
 use log::info;
 use tauri::AppHandle;
 
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 
 /// Version 1: LLM cleanup on, Traditional output, a useful history size,
 /// no upstream "what's new" notes.
@@ -73,6 +73,32 @@ pub fn apply_v5(s: &mut AppSettings) {
     super::prompts::refresh_unedited(&mut s.post_process_prompts);
 }
 
+/// The main hotkey's default before v6. Option+Space collides with other apps
+/// (Chrome in particular).
+pub const OLD_TRANSCRIBE_DEFAULT: &str = "option+space";
+
+/// Version 6: the main hotkey defaults to F1. A binding still on the old
+/// default moves to F1; one the user picked stays. Reset always goes to F1.
+/// Skipped when another shortcut already uses F1.
+pub fn apply_v6(s: &mut AppSettings) {
+    let new_default = crate::settings::get_default_settings().bindings["transcribe"]
+        .default_binding
+        .clone();
+    let taken = s.bindings.iter().any(|(id, b)| {
+        id != "transcribe" && super::hotkey::canonical(&b.current_binding) == new_default
+    });
+    let Some(transcribe) = s.bindings.get_mut("transcribe") else {
+        return;
+    };
+    if taken {
+        return;
+    }
+    if transcribe.current_binding == OLD_TRANSCRIBE_DEFAULT {
+        transcribe.current_binding = new_default.clone();
+    }
+    transcribe.default_binding = new_default;
+}
+
 /// Setup is done once a transcription model has been chosen.
 pub fn setup_done(s: &AppSettings) -> bool {
     !s.selected_model.trim().is_empty()
@@ -104,6 +130,10 @@ pub fn apply_once(app: &AppHandle) {
     if applied == 4 {
         apply_v5(&mut settings);
         applied = 5;
+    }
+    if applied == 5 {
+        apply_v6(&mut settings);
+        applied = 6;
     }
     if applied == cfg.defaults_version {
         return;
@@ -167,6 +197,60 @@ mod tests {
             Some(DEFAULT_PROMPT_ID)
         );
         assert_eq!(s.post_process_models["gemini"], DEFAULT_GEMINI_MODEL);
+    }
+
+    fn set_transcribe(s: &mut AppSettings, current: &str, default: &str) {
+        let b = s.bindings.get_mut("transcribe").unwrap();
+        b.current_binding = current.into();
+        b.default_binding = default.into();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn v6_moves_the_old_default_to_f1() {
+        let mut s = crate::settings::get_default_settings();
+        set_transcribe(&mut s, OLD_TRANSCRIBE_DEFAULT, OLD_TRANSCRIBE_DEFAULT);
+        apply_v6(&mut s);
+        assert_eq!(s.bindings["transcribe"].current_binding, "f1");
+        assert_eq!(s.bindings["transcribe"].default_binding, "f1");
+        // The other shortcuts are untouched.
+        let defaults = crate::settings::get_default_settings();
+        for id in ["transcribe_with_post_process", "cancel"] {
+            assert_eq!(
+                s.bindings[id].current_binding,
+                defaults.bindings[id].current_binding
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn v6_keeps_a_binding_the_user_picked() {
+        let mut s = crate::settings::get_default_settings();
+        set_transcribe(&mut s, "option_right+command_right", OLD_TRANSCRIBE_DEFAULT);
+        apply_v6(&mut s);
+        assert_eq!(
+            s.bindings["transcribe"].current_binding,
+            "option_right+command_right"
+        );
+        // Reset now goes to F1.
+        assert_eq!(s.bindings["transcribe"].default_binding, "f1");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn v6_leaves_the_hotkey_alone_when_f1_is_taken() {
+        let mut s = crate::settings::get_default_settings();
+        set_transcribe(&mut s, OLD_TRANSCRIBE_DEFAULT, OLD_TRANSCRIBE_DEFAULT);
+        s.bindings
+            .get_mut("transcribe_with_post_process")
+            .unwrap()
+            .current_binding = "fn+f1".into();
+        apply_v6(&mut s);
+        assert_eq!(
+            s.bindings["transcribe"].current_binding,
+            OLD_TRANSCRIBE_DEFAULT
+        );
     }
 
     #[test]
