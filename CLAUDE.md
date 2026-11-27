@@ -9,7 +9,7 @@
 
 ## Mac 版規則
 
-- Atype 自己的程式全部放 `apps/mac/src-tauri/src/atype/`（`zh_post.rs` 中文層、`dictionary.rs` 詞典、`prompts.rs` 內建提示詞、`config.rs` 讀寫 `atype.json`、`brain.rs` 第二大腦、`defaults.rs` 一次性預設、`hotkey.rs` F 鍵快捷鍵、`commands.rs` 個人化頁的指令、`mod.rs` 模型清單與 LLM 模型過濾）。對 Handy 原有檔案只加最少的掛鉤。
+- Atype 自己的程式全部放 `apps/mac/src-tauri/src/atype/`（`zh_post.rs` 中文層、`dictionary.rs` 詞典、`prompts.rs` 內建提示詞、`config.rs` 讀寫 `atype.json`、`brain.rs` 第二大腦、`defaults.rs` 一次性預設、`hotkey.rs` F1 快捷鍵、`commands.rs` 個人化頁的指令、`mod.rs` 模型清單與 LLM 模型過濾）。對 Handy 原有檔案只加最少的掛鉤。
 - 新設定放 `atype.json`（`AtypeConfig`），不要往 Handy 的 `AppSettings` 加欄位。要改既有使用者的 Handy 設定，用 `atype/defaults.rs` 加一個新版本，不要只改 `default_*` 函式。
 - 前端新畫面放 `src/components/settings/atype/`；介面文字一律走 i18n，`en` 與 `zh-TW` 兩份都要加。
 - 顏色只改 `src/styles/theme.css` 的 token（目前是鸚鵡綠，取自 App 圖示）。
@@ -23,7 +23,7 @@ bun install
 bun run tauri dev                 # 開發；權限算在終端機身上
 bun run app:install               # 編 release 版並裝到 /Applications/Atype.app
 bun run build                     # 前端型別檢查與建置
-cd src-tauri && cargo test        # 335 個測試
+cd src-tauri && cargo test
 cargo run -- --polish "我们明天下午3:30开会"   # 直接看中文層輸出
 bun run icon:gen / icon:set       # 生圖示（CLIProxyAPI 的 gpt-image）/ 換圖示
 ```

@@ -8,7 +8,7 @@
 //! - `lib.rs` setup → [`init`] (second-brain listener)
 //! - `lib.rs` `collect_commands!` → [`commands`] (the 個人化 settings page)
 //! - `--polish TEXT` on the CLI → [`zh_post::polish`]
-//! - `shortcut::handy_keys` → [`hotkey`] (F1–F20 carry fn on macOS)
+//! - Keyboard backends → [`hotkey`] (macOS F1 compatibility)
 
 pub mod brain;
 pub mod commands;

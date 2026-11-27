@@ -40,7 +40,8 @@ pub fn init_shortcuts(app: &AppHandle) {
 }
 
 /// Validate a shortcut string for the Tauri global-shortcut implementation.
-/// Tauri requires at least one non-modifier key and doesn't support the fn key.
+/// The plugin requires a non-modifier key; see [`hotkey::for_tauri`] for the
+/// legacy F1 alias handled before validation.
 pub fn validate_shortcut(raw: &str) -> Result<(), String> {
     parse_shortcut(raw).map(|_| ())
 }
@@ -73,8 +74,7 @@ fn parse_shortcut(raw: &str) -> Result<Shortcut, String> {
 
     // The name check above passes side-specific modifiers such as
     // `option_left`, which the handy-keys recorder saves but the accelerator
-    // parser rejects. Parse here so a binding carried over from handy-keys is
-    // reset to the default instead of failing to register.
+    // parser rejects. Catch those bindings before attempting registration.
     raw.parse::<Shortcut>()
         .map_err(|e| format!("Failed to parse shortcut '{}': {}", raw, e))
 }

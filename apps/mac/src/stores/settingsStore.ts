@@ -429,7 +429,8 @@ export const useSettingsStore = create<SettingsStore>()(
       try {
         const result = await commands.resetBinding(id);
         if (result.status === "error") throw new Error(result.error);
-        if (!result.data.success) throw new Error(result.data.error ?? undefined);
+        if (!result.data.success)
+          throw new Error(result.data.error ?? undefined);
         await refreshSettings();
       } finally {
         setUpdating(updateKey, false);

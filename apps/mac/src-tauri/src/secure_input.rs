@@ -3,8 +3,8 @@
 //! When any process enables secure event input (password fields, Terminal's
 //! "Secure Keyboard Entry", a stuck `loginwindow`), CGEventTaps stop receiving
 //! KeyDown/KeyUp events while FlagsChanged still flows. The handy-keys
-//! implementation is tap-based, so keyed shortcuts (e.g. Option+Space) die
-//! silently while modifier-only shortcuts keep working. See issue #1578.
+//! implementation is tap-based, so keyed shortcuts stop reaching it while
+//! modifier-only shortcuts keep working. See issue #1578.
 //!
 //! This module:
 //! - polls `IsSecureEventInputEnabled()` and tracks state transitions
@@ -465,8 +465,8 @@ mod imp {
     ///
     /// Carbon has no concept of left/right modifiers, so side-specific
     /// modifiers widen to the whole group — returned as `degraded: true` so
-    /// the UI can call out the changed matching. The fn key cannot be
-    /// expressed at all (`None`).
+    /// the UI can call out the changed matching. If Fn remains after F1
+    /// normalization, Carbon can't express the hotkey.
     fn carbon_equivalent(hotkey: &handy_keys::Hotkey) -> Option<(String, bool)> {
         use handy_keys::Modifiers as M;
 

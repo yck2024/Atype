@@ -30,7 +30,9 @@ export const GeneralSettings: React.FC = () => {
         </div>
         <ShortcutActivationSetting descriptionMode="tooltip" grouped={true} />
         {/* Cancel shortcut remains hidden on Linux because of dynamic shortcut instability. */}
-        {osType !== "linux" && <ShortcutInput shortcutId="cancel" grouped={true} />}
+        {osType !== "linux" && (
+          <ShortcutInput shortcutId="cancel" grouped={true} />
+        )}
       </SettingsGroup>
       <ModelSettingsCard />
       <SettingsGroup title={t("settings.sound.title")}>

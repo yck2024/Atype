@@ -73,8 +73,6 @@ pub fn apply_v5(s: &mut AppSettings) {
     super::prompts::refresh_unedited(&mut s.post_process_prompts);
 }
 
-/// The main hotkey's default before v6. Option+Space collides with other apps
-/// (Chrome in particular).
 pub const OLD_TRANSCRIBE_DEFAULT: &str = "option+space";
 
 fn apply_v6(s: &mut AppSettings) -> bool {
@@ -118,6 +116,8 @@ pub fn apply_once(app: &AppHandle) {
 }
 
 fn apply_pending(settings: &mut AppSettings, mut applied: u32) -> (u32, bool) {
+    // The stored default marks the migration independently of the version:
+    // waiting for model selection can hold the version below v6.
     let migrated_f1 = apply_v6(settings);
     if applied < 1 {
         apply_v1(settings);

@@ -1,3 +1,7 @@
+//! macOS sends a synthetic Fn flag with F1 events even in standard function-key
+//! mode. The event tap needs that flag to match; bindings and Carbon accelerators
+//! treat it as part of F1, not as a separate modifier.
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{mpsc, Mutex};
