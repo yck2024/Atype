@@ -497,6 +497,17 @@ fn register_all_shortcuts_for_implementation(
         if let Err(e) =
             validate_shortcut_for_implementation(&binding.current_binding, implementation)
         {
+            if crate::atype::hotkey::f1_conflict(
+                &current_settings,
+                id,
+                &default_binding.current_binding,
+            ) {
+                warn!(
+                    "Shortcut '{}' ({}) is invalid for {:?}: {}. Keeping it because the default '{}' is in use.",
+                    id, binding.current_binding, implementation, e, default_binding.current_binding
+                );
+                continue;
+            }
             info!(
                 "Shortcut '{}' ({}) is invalid for {:?}: {}. Resetting to default.",
                 id, binding.current_binding, implementation, e

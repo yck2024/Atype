@@ -285,10 +285,13 @@ impl CoordinatorState {
                     .as_ref()
                     .and_then(|press| press.f1_source)
             });
-        if hold_to_talk
-            && held_binding == Some(input.binding_id.as_str())
-            && f1_source.is_some_and(|source| source != input.source)
-        {
+        let crosses_secure_input = match (f1_source, input.source) {
+            #[cfg(target_os = "macos")]
+            (Some(InputSource::HandyKeys), InputSource::Carbon)
+            | (Some(InputSource::Carbon), InputSource::HandyKeys) => true,
+            _ => false,
+        };
+        if hold_to_talk && held_binding == Some(input.binding_id.as_str()) && crosses_secure_input {
             return None;
         }
 
@@ -820,6 +823,33 @@ mod tests {
             assert!(state
                 .on_input(edge(arriving, false), now + ms(200))
                 .is_none());
+            assert!(matches!(
+                state.on_grace_expired(),
+                Some(Effect::Stop { .. })
+            ));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn f1_hold_can_finish_after_switching_between_tauri_and_handy_keys() {
+        let now = Instant::now();
+        for (old, new) in [
+            (InputSource::Tauri, InputSource::HandyKeys),
+            (InputSource::HandyKeys, InputSource::Tauri),
+        ] {
+            let edge = |source, is_pressed| InputEvent {
+                hotkey_string: "f1".into(),
+                source,
+                ..input(ShortcutActivation::PushToTalk, is_pressed)
+            };
+            let mut state = CoordinatorState::new();
+            assert!(matches!(
+                state.on_input(edge(old, true), now),
+                Some(Effect::Start { .. })
+            ));
+            assert!(state.on_input(edge(new, true), now + ms(100)).is_none());
+            assert!(state.on_input(edge(new, false), now + ms(200)).is_none());
             assert!(matches!(
                 state.on_grace_expired(),
                 Some(Effect::Stop { .. })
