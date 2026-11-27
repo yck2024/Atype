@@ -427,10 +427,11 @@ export const useSettingsStore = create<SettingsStore>()(
       setUpdating(updateKey, true);
 
       try {
-        await commands.resetBinding(id);
+        const result = await commands.resetBinding(id);
+        if (result.status === "error") throw new Error(result.error);
+        if (!result.data.success)
+          throw new Error(result.data.error ?? undefined);
         await refreshSettings();
-      } catch (error) {
-        console.error(`Failed to reset binding ${id}:`, error);
       } finally {
         setUpdating(updateKey, false);
       }

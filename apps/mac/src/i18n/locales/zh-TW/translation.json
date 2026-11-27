@@ -168,8 +168,8 @@
         "none": "未設定快捷鍵",
         "notFound": "未找到快捷鍵",
         "pressKeys": "請按鍵...",
-        "secureInputCapture": "macOS 的 Secure Input 目前開著，Atype 改從這個視窗錄製。請按一組快捷鍵，例如 Option + Space。Secure Input 解除前，無法錄製只有修飾鍵或含 fn 的快捷鍵。",
-        "secureInputCaptureWithCulprit": "{{name}} 正在使用 macOS 的 Secure Input，Atype 改從這個視窗錄製。請按一組快捷鍵，例如 Option + Space。它解除前，無法錄製只有修飾鍵或含 fn 的快捷鍵。",
+        "secureInputCapture": "macOS 的 Secure Input 目前開著，Atype 改從這個視窗錄製。仍可錄製 F1；如果 F1 會調整亮度，請按 fn + F1。Secure Input 解除前，無法錄製純修飾鍵或其他含 fn 的組合。",
+        "secureInputCaptureWithCulprit": "{{name}} 正在使用 macOS 的 Secure Input，Atype 改從這個視窗錄製。仍可錄製 F1；如果 F1 會調整亮度，請按 fn + F1。Secure Input 解除前，無法錄製純修飾鍵或其他含 fn 的組合。",
         "bindings": {
           "transcribe": {
             "name": "轉錄快捷鍵",
@@ -187,7 +187,8 @@
         "errors": {
           "restore": "無法還原原始快捷鍵",
           "set": "無法設定快捷鍵: {{error}}",
-          "reset": "無法將快捷鍵重設為原始值"
+          "reset": "無法將快捷鍵重設為原始值",
+          "conflict": "快捷鍵「{{binding}}」已被使用。"
         }
       },
       "language": {
@@ -213,6 +214,7 @@
       }
     },
     "atype": {
+      "functionKeyHint": "按 F1 如果變成調整螢幕亮度，改按 fn + F1，或到「系統設定 → 鍵盤 → 鍵盤快速鍵⋯ → 功能鍵」打開「使用F1、F2等按鍵作為標準功能鍵」。也可以點上面的按鍵換成別的。",
       "usage": {
         "title": "我的使用量",
         "description": "依第二大腦的紀錄計算",
@@ -685,7 +687,7 @@
         "title": "鍵盤診斷",
         "description": "檢查鍵盤事件是否能送達 Atype。只會記錄事件數量，絕不記錄您按了哪些按鍵。",
         "run": "執行 10 秒診斷",
-        "running": "正在監聽… 請按幾次您的快捷鍵（例如 Option+Space）",
+        "running": "正在監聽… 請按幾次您的快捷鍵（例如 F1）",
         "secureInputLabel": "Secure Input",
         "enabled": "已啟用",
         "disabled": "已停用",

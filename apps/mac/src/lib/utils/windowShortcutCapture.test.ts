@@ -104,13 +104,29 @@ assert.equal(isSecureInputRefusal("Already recording"), false);
   });
 }
 
+for (const fnFlag of [false, true]) {
+  for (const shiftKey of [false, true]) {
+    const capture = new WindowShortcutCapture();
+    const flags = { getModifierState: (k: string) => fnFlag && k === "Fn" };
+    const hotkey = shiftKey ? "shift+f1" : "f1";
+    assert.deepEqual(capture.keyDown(ev("F1", { shiftKey }, flags)), {
+      type: "preview",
+      hotkey,
+    });
+    assert.deepEqual(capture.keyUp(ev("F1")), { type: "commit", hotkey });
+  }
+}
+
 // fn combinations and unknown keys are refused rather than saved wrongly.
 {
   const capture = new WindowShortcutCapture();
-  assert.equal(
-    capture.keyDown(ev("F5", {}, { getModifierState: (k) => k === "Fn" })).type,
-    "unsupported",
-  );
+  for (const code of ["KeyA", "F2", "F5", "F24"]) {
+    assert.equal(
+      capture.keyDown(ev(code, {}, { getModifierState: (k) => k === "Fn" }))
+        .type,
+      "unsupported",
+    );
+  }
   assert.equal(capture.keyDown(ev("Fn")).type, "unsupported");
   assert.equal(capture.keyDown(ev("AudioVolumeUp")).type, "unsupported");
   assert.equal(capture.keyUp(ev("AudioVolumeUp")).type, "preview");

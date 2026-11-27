@@ -3,8 +3,8 @@
 //! When any process enables secure event input (password fields, Terminal's
 //! "Secure Keyboard Entry", a stuck `loginwindow`), CGEventTaps stop receiving
 //! KeyDown/KeyUp events while FlagsChanged still flows. The handy-keys
-//! implementation is tap-based, so keyed shortcuts (e.g. Option+Space) die
-//! silently while modifier-only shortcuts keep working. See issue #1578.
+//! implementation is tap-based, so keyed shortcuts stop reaching it while
+//! modifier-only shortcuts keep working. See issue #1578.
 //!
 //! This module:
 //! - polls `IsSecureEventInputEnabled()` and tracks state transitions
@@ -410,6 +410,17 @@ mod imp {
                         None => info!("SecureInput ENABLED (no visible holder)"),
                     }
                     *state.culprit.lock().unwrap() = culprit;
+                    if settings::get_settings(&app).keyboard_implementation
+                        == KeyboardImplementation::HandyKeys
+                    {
+                        if let Some(tap) =
+                            app.try_state::<crate::shortcut::handy_keys::HandyKeysState>()
+                        {
+                            if let Err(e) = tap.reset_f1_for_secure_input() {
+                                warn!("SecureInput: failed to reset tap F1: {e}");
+                            }
+                        }
+                    }
                     state.enabled.store(true, Ordering::SeqCst);
                     // Arm the fallback right away: the event tap is already
                     // blind to KeyDown, so waiting would leave keyed
@@ -436,6 +447,11 @@ mod imp {
                     // Drops every shadow and emits the cleared status, so the
                     // banner and tray badge go away on release.
                     reconcile_fallback(&app);
+                    if let Some(coordinator) = app.try_state::<crate::TranscriptionCoordinator>() {
+                        coordinator.notify_secure_input_handoff(
+                            crate::transcription_coordinator::InputSource::Carbon,
+                        );
+                    }
                 }
             }
         });
@@ -449,8 +465,8 @@ mod imp {
     ///
     /// Carbon has no concept of left/right modifiers, so side-specific
     /// modifiers widen to the whole group — returned as `degraded: true` so
-    /// the UI can call out the changed matching. The fn key cannot be
-    /// expressed at all (`None`).
+    /// the UI can call out the changed matching. If Fn remains after F1
+    /// normalization, Carbon can't express the hotkey.
     fn carbon_equivalent(hotkey: &handy_keys::Hotkey) -> Option<(String, bool)> {
         use handy_keys::Modifiers as M;
 
@@ -488,7 +504,7 @@ mod imp {
     }
 
     pub(super) fn plan_fallback_binding(id: &str, binding: &ShortcutBinding) -> ShadowPlan {
-        let Ok(hotkey) = binding.current_binding.parse::<handy_keys::Hotkey>() else {
+        let Ok(hotkey) = crate::atype::hotkey::parse(&binding.current_binding) else {
             warn!(
                 "SecureInput fallback: '{}' has unparseable binding '{}', skipping",
                 id, binding.current_binding
@@ -588,7 +604,7 @@ mod imp {
             );
         }
         for binding in stale {
-            if let Err(e) = crate::shortcut::tauri_impl::unregister_shortcut(app, binding.clone()) {
+            if let Err(e) = crate::shortcut::tauri_impl::unregister_shadow(app, binding.clone()) {
                 warn!(
                     "SecureInput fallback: failed to unregister '{}': {}",
                     binding.current_binding, e
@@ -611,7 +627,7 @@ mod imp {
                 continue;
             }
 
-            match crate::shortcut::tauri_impl::register_shortcut(app, shadow.clone()) {
+            match crate::shortcut::tauri_impl::register_shadow(app, shadow.clone()) {
                 Ok(()) => {
                     info!(
                         "SecureInput fallback: '{}' registered via Carbon as '{}'{}",
@@ -888,6 +904,23 @@ mod tests {
                 _ => panic!("{id} should be shadowed through Carbon"),
             }
         }
+    }
+
+    #[test]
+    fn f1_is_shadowed_through_carbon_in_both_stored_forms() {
+        for (raw, expected) in [("f1", "f1"), ("fn+f1", "f1"), ("fn+shift+f1", "shift+f1")] {
+            match plan_fallback_binding("transcribe", &binding("transcribe", raw)) {
+                ShadowPlan::Shadow { shadow, degraded } => {
+                    assert!(!degraded);
+                    assert_eq!(shadow.current_binding, expected);
+                }
+                _ => panic!("{raw} should be shadowed through Carbon"),
+            }
+        }
+        assert!(matches!(
+            plan_fallback_binding("transcribe", &binding("transcribe", "fn+f2")),
+            ShadowPlan::Uncovered
+        ));
     }
 
     #[test]

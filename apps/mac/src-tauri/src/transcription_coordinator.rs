@@ -49,6 +49,7 @@ struct PendingPress {
     /// within the threshold (a tap). An unlocked pending press is a key we
     /// believe is still held.
     locked: bool,
+    f1_source: Option<InputSource>,
 }
 
 impl PendingPress {
@@ -77,6 +78,7 @@ struct Hold {
     /// ignored. Always set for toggle; set for hold-or-toggle once a release
     /// has been classified as a tap.
     locked: bool,
+    f1_source: Option<InputSource>,
 }
 
 /// What to do with an input that arrives while the pipeline is busy
@@ -127,6 +129,15 @@ enum Stage {
     Processing,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputSource {
+    HandyKeys,
+    Tauri,
+    #[cfg(target_os = "macos")]
+    Carbon,
+    External,
+}
+
 /// A keyboard/signal edge for a transcribe binding.
 struct InputEvent {
     binding_id: String,
@@ -135,13 +146,16 @@ struct InputEvent {
     mode: ShortcutActivation,
     /// Hold-or-toggle: minimum press duration that counts as a hold.
     hold_threshold: Duration,
-    /// External triggers (SIGUSR2, CLI flags) rather than physical keys.
-    /// They fire on every edge by design and must never be debounced —
-    /// dropping one desyncs toggle parity and wedges recording on.
-    external: bool,
+    source: InputSource,
 }
 
 impl InputEvent {
+    fn f1_source(&self) -> Option<InputSource> {
+        (self.source != InputSource::External
+            && crate::atype::hotkey::is_f1_binding(&self.hotkey_string))
+        .then_some(self.source)
+    }
+
     /// The hold duration at or above which a release stops recording.
     fn effective_hold_threshold(&self) -> Duration {
         match self.mode {
@@ -170,7 +184,11 @@ enum Effect {
 /// Commands processed sequentially by the coordinator thread.
 enum Command {
     Input(InputEvent),
-    Cancel { recording_was_active: bool },
+    Cancel {
+        recording_was_active: bool,
+    },
+    #[cfg(target_os = "macos")]
+    SecureInputHandoff(InputSource),
     ProcessingFinished,
 }
 
@@ -258,6 +276,24 @@ impl CoordinatorState {
             Stage::Idle => None,
         };
         let hold_to_talk = input.mode != ShortcutActivation::Toggle && !self.is_locked();
+        let f1_source = self
+            .hold
+            .as_ref()
+            .and_then(|hold| hold.f1_source)
+            .or_else(|| {
+                self.pending_press
+                    .as_ref()
+                    .and_then(|press| press.f1_source)
+            });
+        let crosses_secure_input = match (f1_source, input.source) {
+            #[cfg(target_os = "macos")]
+            (Some(InputSource::HandyKeys), InputSource::Carbon)
+            | (Some(InputSource::Carbon), InputSource::HandyKeys) => true,
+            _ => false,
+        };
+        if hold_to_talk && held_binding == Some(input.binding_id.as_str()) && crosses_secure_input {
+            return None;
+        }
 
         match classify_ptt_event(
             pending_release_binding,
@@ -287,7 +323,7 @@ impl CoordinatorState {
         // Releases in the hold modes are deferred above to absorb X11 auto-repeat.
         // External triggers are exempt: each one is a deliberate edge from the
         // user's own integration, and dropping it desyncs toggle parity.
-        if input.is_pressed && !input.external {
+        if input.is_pressed && input.source != InputSource::External {
             if self
                 .last_press
                 .is_some_and(|t| now.duration_since(t) < DEBOUNCE)
@@ -325,6 +361,7 @@ impl CoordinatorState {
                     self.pending_press = Some(PendingPress {
                         // Toggle never ends on a release: locked from the start.
                         locked: input.mode == ShortcutActivation::Toggle,
+                        f1_source: input.f1_source(),
                         binding_id: input.binding_id,
                         hotkey_string: input.hotkey_string,
                         pressed_at: now,
@@ -346,11 +383,13 @@ impl CoordinatorState {
                 Stage::Idle => {
                     // Toggle never ends on a release: locked from the start.
                     let locked = input.mode == ShortcutActivation::Toggle;
+                    let f1_source = input.f1_source();
                     return Some(self.begin_recording(
                         input.binding_id,
                         input.hotkey_string,
                         now,
                         locked,
+                        f1_source,
                     ));
                 }
                 Stage::Recording(id) if id == &input.binding_id => {
@@ -478,6 +517,26 @@ impl CoordinatorState {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    fn on_secure_input_handoff(&mut self, departing: InputSource) -> bool {
+        if self.pending_release.is_some() || self.is_locked() {
+            return false;
+        }
+        if self.hold.as_ref().and_then(|hold| hold.f1_source) == Some(departing) {
+            self.on_cancel(true);
+            return true;
+        }
+        if self
+            .pending_press
+            .as_ref()
+            .and_then(|press| press.f1_source)
+            == Some(departing)
+        {
+            self.pending_press = None;
+        }
+        false
+    }
+
     fn on_processing_finished(&mut self) -> Option<Effect> {
         self.stage = Stage::Idle;
         self.hold = None;
@@ -491,6 +550,7 @@ impl CoordinatorState {
             pending.hotkey_string,
             pending.pressed_at,
             pending.locked,
+            pending.f1_source,
         ))
     }
 
@@ -512,9 +572,14 @@ impl CoordinatorState {
         hotkey_string: String,
         pressed_at: Instant,
         locked: bool,
+        f1_source: Option<InputSource>,
     ) -> Effect {
         self.stage = Stage::Recording(binding_id.clone());
-        self.hold = Some(Hold { pressed_at, locked });
+        self.hold = Some(Hold {
+            pressed_at,
+            locked,
+            f1_source,
+        });
         Effect::Start {
             binding_id,
             hotkey_string,
@@ -580,6 +645,12 @@ impl TranscriptionCoordinator {
                         Command::Cancel {
                             recording_was_active,
                         } => state.on_cancel(recording_was_active),
+                        #[cfg(target_os = "macos")]
+                        Command::SecureInputHandoff(departing) => {
+                            if state.on_secure_input_handoff(departing) {
+                                crate::utils::cancel_operation(&app);
+                            }
+                        }
                         Command::ProcessingFinished => {
                             if let Some(effect) = state.on_processing_finished() {
                                 run_effect(&app, &mut state, effect);
@@ -597,8 +668,21 @@ impl TranscriptionCoordinator {
         Self { tx }
     }
 
-    /// Send a keyboard input event for a transcribe binding. `hold_threshold`
-    /// only matters for [`ShortcutActivation::HoldOrToggle`].
+    /// Send an external trigger (SIGUSR2, CLI flag). Always a toggle press,
+    /// always exempt from debounce.
+    pub fn send_external_input(&self, binding_id: &str, source: &str) {
+        self.send_input(
+            binding_id,
+            source,
+            true,
+            ShortcutActivation::Toggle,
+            Duration::ZERO,
+            InputSource::External,
+        );
+    }
+
+    /// Send a shortcut edge for a transcribe binding. `hold_threshold` only
+    /// matters for [`ShortcutActivation::HoldOrToggle`].
     pub fn send_input(
         &self,
         binding_id: &str,
@@ -606,38 +690,7 @@ impl TranscriptionCoordinator {
         is_pressed: bool,
         mode: ShortcutActivation,
         hold_threshold: Duration,
-    ) {
-        self.send(
-            binding_id,
-            hotkey_string,
-            is_pressed,
-            mode,
-            hold_threshold,
-            false,
-        );
-    }
-
-    /// Send an external trigger (SIGUSR2, CLI flag). Always a toggle press,
-    /// always exempt from debounce — see [`InputEvent::external`].
-    pub fn send_external_input(&self, binding_id: &str, source: &str) {
-        self.send(
-            binding_id,
-            source,
-            true,
-            ShortcutActivation::Toggle,
-            Duration::ZERO,
-            true,
-        );
-    }
-
-    fn send(
-        &self,
-        binding_id: &str,
-        hotkey_string: &str,
-        is_pressed: bool,
-        mode: ShortcutActivation,
-        hold_threshold: Duration,
-        external: bool,
+        source: InputSource,
     ) {
         if self
             .tx
@@ -647,7 +700,7 @@ impl TranscriptionCoordinator {
                 is_pressed,
                 mode,
                 hold_threshold,
-                external,
+                source,
             }))
             .is_err()
         {
@@ -661,6 +714,17 @@ impl TranscriptionCoordinator {
             .send(Command::Cancel {
                 recording_was_active,
             })
+            .is_err()
+        {
+            warn!("Transcription coordinator channel closed");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn notify_secure_input_handoff(&self, departing: InputSource) {
+        if self
+            .tx
+            .send(Command::SecureInputHandoff(departing))
             .is_err()
         {
             warn!("Transcription coordinator channel closed");
@@ -718,6 +782,141 @@ fn stop(app: &AppHandle, binding_id: &str, hotkey_string: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn f1_secure_input_handoff_cancels_only_the_departing_hold_in_either_direction() {
+        let now = Instant::now();
+        for (departing, arriving) in [
+            (InputSource::HandyKeys, InputSource::Carbon),
+            (InputSource::Carbon, InputSource::HandyKeys),
+        ] {
+            let mut state = CoordinatorState::new();
+            let edge = |source, is_pressed| InputEvent {
+                hotkey_string: if source == InputSource::HandyKeys {
+                    "fn+f1"
+                } else {
+                    "F1"
+                }
+                .into(),
+                source,
+                ..input(ShortcutActivation::PushToTalk, is_pressed)
+            };
+            assert!(matches!(
+                state.on_input(edge(departing, true), now),
+                Some(Effect::Start { .. })
+            ));
+            assert!(state
+                .on_input(edge(arriving, false), now + ms(50))
+                .is_none());
+            assert!(state.on_secure_input_handoff(departing));
+            assert_eq!(state.stage, Stage::Idle);
+            assert!(matches!(
+                state.on_input(edge(arriving, true), now + ms(100)),
+                Some(Effect::Start { .. })
+            ));
+            assert!(!state.on_secure_input_handoff(departing));
+            assert!(state
+                .on_input(edge(departing, false), now + ms(150))
+                .is_none());
+            assert!(state.on_grace_expired().is_none());
+            assert!(state
+                .on_input(edge(arriving, false), now + ms(200))
+                .is_none());
+            assert!(matches!(
+                state.on_grace_expired(),
+                Some(Effect::Stop { .. })
+            ));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn f1_hold_can_finish_after_switching_between_tauri_and_handy_keys() {
+        let now = Instant::now();
+        for (old, new) in [
+            (InputSource::Tauri, InputSource::HandyKeys),
+            (InputSource::HandyKeys, InputSource::Tauri),
+        ] {
+            let edge = |source, is_pressed| InputEvent {
+                hotkey_string: "f1".into(),
+                source,
+                ..input(ShortcutActivation::PushToTalk, is_pressed)
+            };
+            let mut state = CoordinatorState::new();
+            assert!(matches!(
+                state.on_input(edge(old, true), now),
+                Some(Effect::Start { .. })
+            ));
+            assert!(state.on_input(edge(new, true), now + ms(100)).is_none());
+            assert!(state.on_input(edge(new, false), now + ms(200)).is_none());
+            assert!(matches!(
+                state.on_grace_expired(),
+                Some(Effect::Stop { .. })
+            ));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn f1_secure_input_handoff_keeps_an_arriving_press_queued_during_processing() {
+        let now = Instant::now();
+        for departing in [InputSource::HandyKeys, InputSource::Carbon] {
+            for source in [InputSource::HandyKeys, InputSource::Carbon] {
+                let mut state = CoordinatorState::new();
+                drive_into_processing(&mut state, now);
+                state.on_input(
+                    InputEvent {
+                        hotkey_string: "Shift+F1".into(),
+                        source,
+                        ..input(ShortcutActivation::PushToTalk, true)
+                    },
+                    now + ms(200),
+                );
+                assert!(!state.on_secure_input_handoff(departing));
+                assert_eq!(
+                    state.on_processing_finished().is_some(),
+                    source != departing
+                );
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn f1_secure_input_handoff_keeps_locked_and_released_recordings() {
+        let now = Instant::now();
+        let mut state = CoordinatorState::new();
+        let edge = |mode, is_pressed| InputEvent {
+            hotkey_string: "f1".into(),
+            ..input(mode, is_pressed)
+        };
+        state.on_input(edge(ShortcutActivation::Toggle, true), now);
+        assert!(!state.on_secure_input_handoff(InputSource::HandyKeys));
+        assert!(state.is_locked());
+
+        let mut state = CoordinatorState::new();
+        state.on_input(edge(ShortcutActivation::PushToTalk, true), now);
+        state.on_input(edge(ShortcutActivation::PushToTalk, false), now + ms(100));
+        assert!(!state.on_secure_input_handoff(InputSource::HandyKeys));
+        assert!(matches!(
+            state.on_grace_expired(),
+            Some(Effect::Stop { .. })
+        ));
+        state.on_input(edge(ShortcutActivation::PushToTalk, true), now + ms(200));
+        assert!(!state.on_secure_input_handoff(InputSource::HandyKeys));
+        assert!(state.on_processing_finished().is_none());
+
+        state.on_input(
+            InputEvent {
+                hotkey_string: "option+space".into(),
+                ..input(ShortcutActivation::PushToTalk, true)
+            },
+            now + ms(300),
+        );
+        assert!(!state.on_secure_input_handoff(InputSource::HandyKeys));
+        assert!(matches!(state.stage, Stage::Recording(_)));
+    }
 
     #[test]
     fn push_to_talk_release_while_recording_defers_release() {
@@ -901,7 +1100,7 @@ mod tests {
             is_pressed,
             mode: ShortcutActivation::PushToTalk,
             hold_threshold: Duration::ZERO,
-            external: false,
+            source: InputSource::HandyKeys,
         }
     }
 
@@ -1039,7 +1238,7 @@ mod tests {
                     is_pressed: true,
                     mode: ShortcutActivation::Toggle,
                     hold_threshold: Duration::ZERO,
-                    external: true,
+                    source: InputSource::External,
                 },
                 at,
             )
@@ -1101,7 +1300,11 @@ mod tests {
             is_pressed: true,
             mode: ShortcutActivation::Toggle,
             hold_threshold: Duration::ZERO,
-            external,
+            source: if external {
+                InputSource::External
+            } else {
+                InputSource::HandyKeys
+            },
         }
     }
 
@@ -1226,7 +1429,7 @@ mod tests {
             is_pressed,
             mode,
             hold_threshold: HOLD_THRESHOLD,
-            external: false,
+            source: InputSource::HandyKeys,
         }
     }
 

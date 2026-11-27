@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { formatKeyCombination } from "../../lib/utils/keyboard";
+import { shortcutErrorMessage } from "../../lib/utils/shortcutErrors";
 import {
   isSecureInputRefusal,
   WindowShortcutCapture,
@@ -53,7 +54,6 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
     null,
   );
   const [currentKeys, setCurrentKeys] = useState<string>("");
-  const [originalBinding, setOriginalBinding] = useState<string>("");
   const shortcutRef = useRef<HTMLDivElement | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
   // Mirrors isRecording for unmount cleanup
@@ -106,37 +106,8 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
     setSecureInputHolder(null);
     setCurrentKeys("");
     resetCaptureRefs();
-    setOriginalBinding("");
     releaseCaptureOwner();
   }, [stopListening, resetCaptureRefs, releaseCaptureOwner]);
-
-  // Handle cancellation
-  const cancelRecording = useCallback(async () => {
-    if (!isRecording) return;
-
-    // Stop listening for key events; finishRecording stops the backend
-    stopListening();
-
-    // Restore original binding
-    if (originalBinding) {
-      try {
-        await updateBinding(shortcutId, originalBinding);
-      } catch (error) {
-        console.error("Failed to restore original binding:", error);
-        toast.error(t("settings.general.shortcut.errors.restore"));
-      }
-    }
-
-    await finishRecording();
-  }, [
-    isRecording,
-    originalBinding,
-    shortcutId,
-    updateBinding,
-    t,
-    stopListening,
-    finishRecording,
-  ]);
 
   const commitAndStop = useCallback(
     async (keysToCommit: string) => {
@@ -144,26 +115,12 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
         await updateBinding(shortcutId, keysToCommit);
       } catch (error) {
         console.error("Failed to change binding:", error);
-        toast.error(
-          t("settings.general.shortcut.errors.set", {
-            error: String(error),
-          }),
-        );
-
-        // Reset to original binding on error
-        if (originalBinding) {
-          try {
-            await updateBinding(shortcutId, originalBinding);
-          } catch (resetError) {
-            console.error("Failed to reset binding:", resetError);
-            toast.error(t("settings.general.shortcut.errors.reset"));
-          }
-        }
+        toast.error(shortcutErrorMessage(t, error, "set"));
       }
 
       await finishRecording();
     },
-    [shortcutId, originalBinding, updateBinding, t, finishRecording],
+    [shortcutId, updateBinding, t, finishRecording],
   );
 
   // Event handlers read the latest callback through a ref, so a re-render
@@ -323,13 +280,13 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
         shortcutRef.current &&
         !shortcutRef.current.contains(e.target as Node)
       ) {
-        cancelRecording();
+        void finishRecording();
       }
     };
 
     window.addEventListener("click", handleClickOutside);
     return () => window.removeEventListener("click", handleClickOutside);
-  }, [isRecording, cancelRecording]);
+  }, [isRecording, finishRecording]);
 
   // Start recording a new shortcut
   const startRecording = async () => {
@@ -343,9 +300,6 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
     }
     activeCaptureOwner = captureOwnerRef.current;
     startingRef.current = true;
-
-    // Store the original binding to restore if canceled
-    setOriginalBinding(bindings[shortcutId]?.current_binding || "");
 
     try {
       const result = await commands.startHandyKeysRecording(shortcutId);
@@ -497,7 +451,11 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
           </div>
         )}
         <ResetButton
-          onClick={() => resetBinding(shortcutId)}
+          onClick={() =>
+            resetBinding(shortcutId).catch((error) =>
+              toast.error(shortcutErrorMessage(t, error, "reset")),
+            )
+          }
           disabled={isUpdating(`binding_${shortcutId}`)}
         />
       </div>

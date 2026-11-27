@@ -40,7 +40,7 @@ open Atype.xcodeproj
 
 ```mermaid
 flowchart LR
-  K[按住 Option + Space] --> R[錄音]
+  K[按住主熱鍵] --> R[錄音]
   R --> S[本機辨識<br/>SenseVoice Small]
   S --> L{{LLM 整理<br/>Gemini 或 CLI Proxy · 2.5 秒預算}}
   L -->|回來| Z[確定性中文層<br/>繁體 · 全形標點 · 中英空格]

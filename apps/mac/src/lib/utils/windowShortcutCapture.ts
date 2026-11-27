@@ -12,7 +12,8 @@
  * Modifiers are recorded without a side (`option`, not `option_left`) because
  * DOM modifier flags do not say which side is held.
  *
- * Not available in this mode: modifier-only shortcuts and fn combinations.
+ * Modifier-only shortcuts and Fn combinations cannot be captured here, except
+ * that the Fn flag on F1 is treated as part of the key rather than a modifier.
  */
 
 export interface WindowKeyEvent {
@@ -114,7 +115,7 @@ export const windowModifiers = (e: WindowKeyEvent): string[] => {
 };
 
 const fnHeld = (e: WindowKeyEvent): boolean =>
-  e.code === "Fn" || e.getModifierState?.("Fn") === true;
+  e.code === "Fn" || (e.code !== "F1" && e.getModifierState?.("Fn") === true);
 
 /**
  * Turns one recording session's window key events into preview/commit

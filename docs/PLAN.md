@@ -16,7 +16,7 @@
 - **整理用雲端 LLM**：預設 Gemini 3.1 Flash-Lite，備選 Claude Haiku 4.5。只送文字，不送音訊、視窗標題或網址。超過 2.5 秒沒回來就貼本機處理過的原文。
 - **繁體與排版不靠 LLM**：確定性中文層（OpenCC `s2twp` 閘門、全形標點、中英空格）每次都跑。
 - **第二大腦**：每一筆輸入都追加到 `atype.jsonl` 和每日 Markdown，預設放 iCloud Drive 的 `service-db/Atype`。
-- **主熱鍵就是全部**：按住 Option + Space 說話、放開貼上；有開後處理就自動經過 LLM。
+- **主熱鍵**：見 [Mac 快捷鍵設定](../apps/mac/README.md#第一次設定)。
 
 ## 管線
 

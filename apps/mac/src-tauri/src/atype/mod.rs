@@ -8,12 +8,14 @@
 //! - `lib.rs` setup → [`init`] (second-brain listener)
 //! - `lib.rs` `collect_commands!` → [`commands`] (the 個人化 settings page)
 //! - `--polish TEXT` on the CLI → [`zh_post::polish`]
+//! - Keyboard backends → [`hotkey`] (macOS F1 compatibility)
 
 pub mod brain;
 pub mod commands;
 pub mod config;
 pub mod defaults;
 pub mod dictionary;
+pub mod hotkey;
 pub mod prompts;
 pub mod shared;
 pub mod zh_post;
