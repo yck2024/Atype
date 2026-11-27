@@ -113,8 +113,14 @@ export const windowModifiers = (e: WindowKeyEvent): string[] => {
   return modifiers;
 };
 
+/** F1–F24: macOS reports fn on these whether or not it is held. */
+const isFunctionKey = (code: string): boolean =>
+  /^F([1-9]|1[0-9]|2[0-4])$/.test(code);
+
+/** fn held on purpose; on a function key it is implied, so F1 records as "f1". */
 const fnHeld = (e: WindowKeyEvent): boolean =>
-  e.code === "Fn" || e.getModifierState?.("Fn") === true;
+  e.code === "Fn" ||
+  (e.getModifierState?.("Fn") === true && !isFunctionKey(e.code));
 
 /**
  * Turns one recording session's window key events into preview/commit

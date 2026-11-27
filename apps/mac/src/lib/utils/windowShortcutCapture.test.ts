@@ -104,11 +104,27 @@ assert.equal(isSecureInputRefusal("Already recording"), false);
   });
 }
 
+// macOS reports fn on every function key, so F1 still records as "f1"
+// (the backend adds fn back when it registers the hotkey).
+{
+  const capture = new WindowShortcutCapture();
+  const fn = { getModifierState: (k: string) => k === "Fn" };
+  assert.deepEqual(capture.keyDown(ev("F1", {}, fn)), {
+    type: "preview",
+    hotkey: "f1",
+  });
+  assert.deepEqual(capture.keyUp(ev("F1", {}, fn)), {
+    type: "commit",
+    hotkey: "f1",
+  });
+}
+
 // fn combinations and unknown keys are refused rather than saved wrongly.
 {
   const capture = new WindowShortcutCapture();
   assert.equal(
-    capture.keyDown(ev("F5", {}, { getModifierState: (k) => k === "Fn" })).type,
+    capture.keyDown(ev("KeyA", {}, { getModifierState: (k) => k === "Fn" }))
+      .type,
     "unsupported",
   );
   assert.equal(capture.keyDown(ev("Fn")).type, "unsupported");

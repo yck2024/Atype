@@ -890,6 +890,23 @@ mod tests {
         }
     }
 
+    /// Atype stores F1 without fn, so it keeps working through Carbon; a
+    /// recorded `fn+f1` could not be shadowed.
+    #[test]
+    fn the_f1_default_is_shadowed_through_carbon() {
+        match plan_fallback_binding("transcribe", &binding("transcribe", "f1")) {
+            ShadowPlan::Shadow { shadow, degraded } => {
+                assert!(!degraded);
+                assert_eq!(shadow.current_binding, "f1");
+            }
+            _ => panic!("f1 should be shadowed through Carbon"),
+        }
+        assert!(matches!(
+            plan_fallback_binding("transcribe", &binding("transcribe", "fn+f1")),
+            ShadowPlan::Uncovered
+        ));
+    }
+
     #[test]
     fn nothing_is_shadowed_before_secure_input_is_observed() {
         let ids = fallback_candidates(
