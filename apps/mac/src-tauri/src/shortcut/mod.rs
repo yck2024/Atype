@@ -32,7 +32,6 @@ use crate::tray;
 
 /// Initialize shortcuts using the configured implementation
 pub fn init_shortcuts(app: &AppHandle) {
-    crate::atype::defaults::apply_once(app);
     let user_settings = settings::load_or_create_app_settings(app);
 
     // Check which implementation to use
@@ -200,15 +199,21 @@ pub fn change_binding(
         }
     };
 
-    validate_shortcut_for_implementation(&binding, settings.keyboard_implementation)?;
-    if crate::atype::hotkey::binding_is_taken(&settings, &id, &binding) {
-        return Err(format!("Shortcut '{}' is already in use", binding));
+    if crate::atype::hotkey::f1_conflict(&settings, &id, &binding) {
+        return Err(format!(
+            "shortcut-conflict:{}",
+            crate::atype::hotkey::canonical(&binding)
+        ));
     }
 
     let mut updated_binding = binding_to_modify.clone();
     updated_binding.current_binding = binding;
 
     if id != "cancel" {
+        validate_shortcut_for_implementation(
+            &updated_binding.current_binding,
+            settings.keyboard_implementation,
+        )?;
         if let Err(e) = unregister_shortcut(&app, binding_to_modify.clone()) {
             error!("change_binding error: Failed to unregister shortcut: {}", e);
         }
@@ -492,17 +497,6 @@ fn register_all_shortcuts_for_implementation(
         if let Err(e) =
             validate_shortcut_for_implementation(&binding.current_binding, implementation)
         {
-            if crate::atype::hotkey::binding_is_taken(
-                &current_settings,
-                id,
-                &default_binding.current_binding,
-            ) {
-                warn!(
-                    "Shortcut '{}' is invalid for {:?} and its default is already in use: {}",
-                    id, implementation, e
-                );
-                continue;
-            }
             info!(
                 "Shortcut '{}' ({}) is invalid for {:?}: {}. Resetting to default.",
                 id, binding.current_binding, implementation, e

@@ -187,7 +187,8 @@
         "errors": {
           "restore": "無法還原原始快捷鍵",
           "set": "無法設定快捷鍵: {{error}}",
-          "reset": "無法將快捷鍵重設為原始值"
+          "reset": "無法將快捷鍵重設為原始值",
+          "conflict": "快捷鍵「{{binding}}」已被使用。"
         }
       },
       "language": {

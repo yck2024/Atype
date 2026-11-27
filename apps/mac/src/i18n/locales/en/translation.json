@@ -187,7 +187,8 @@
         "errors": {
           "restore": "Failed to restore original shortcut",
           "set": "Failed to set shortcut: {{error}}",
-          "reset": "Failed to reset shortcut to original value"
+          "reset": "Failed to reset shortcut to original value",
+          "conflict": "The shortcut {{binding}} is already in use."
         }
       },
       "language": {

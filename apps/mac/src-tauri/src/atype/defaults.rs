@@ -11,7 +11,7 @@ use crate::settings::{
     DEFAULT_PROMPT_ID,
 };
 use log::info;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 pub const VERSION: u32 = 6;
 
@@ -77,21 +77,25 @@ pub fn apply_v5(s: &mut AppSettings) {
 /// (Chrome in particular).
 pub const OLD_TRANSCRIBE_DEFAULT: &str = "option+space";
 
-pub fn apply_v6(s: &mut AppSettings) {
+fn apply_v6(s: &mut AppSettings) -> bool {
     if !cfg!(target_os = "macos") {
-        return;
+        return false;
     }
     let new_default = crate::settings::get_default_settings().bindings["transcribe"]
         .default_binding
         .clone();
-    let taken = super::hotkey::binding_is_taken(s, "transcribe", &new_default);
+    let taken = super::hotkey::f1_conflict(s, "transcribe", &new_default);
     let Some(transcribe) = s.bindings.get_mut("transcribe") else {
-        return;
+        return false;
     };
+    if transcribe.default_binding == new_default {
+        return false;
+    }
     if !taken && transcribe.current_binding == OLD_TRANSCRIBE_DEFAULT {
         transcribe.current_binding = new_default.clone();
     }
     transcribe.default_binding = new_default;
+    true
 }
 
 /// Setup is done once a transcription model has been chosen.
@@ -101,25 +105,20 @@ pub fn setup_done(s: &AppSettings) -> bool {
 
 pub fn apply_once(app: &AppHandle) {
     let mut cfg = config::load(app);
-    if cfg.defaults_version >= VERSION {
-        return;
-    }
     let mut settings = get_settings(app);
-    let applied = apply_pending(&mut settings, cfg.defaults_version);
-    if applied == cfg.defaults_version {
-        return;
+    let (applied, migrated_f1) = apply_pending(&mut settings, cfg.defaults_version);
+    if migrated_f1 || applied != cfg.defaults_version {
+        write_settings(app, settings);
     }
-    write_settings(app, settings);
-    cfg.defaults_version = applied;
-    config::save(app, &cfg);
-    let _ = app.emit(
-        "settings-changed",
-        serde_json::json!({ "setting": "bindings" }),
-    );
-    info!("Atype: applied one-time defaults up to v{}", applied);
+    if applied != cfg.defaults_version {
+        cfg.defaults_version = applied;
+        config::save(app, &cfg);
+        info!("Atype: applied one-time defaults up to v{}", applied);
+    }
 }
 
-fn apply_pending(settings: &mut AppSettings, mut applied: u32) -> u32 {
+fn apply_pending(settings: &mut AppSettings, mut applied: u32) -> (u32, bool) {
+    let migrated_f1 = apply_v6(settings);
     if applied < 1 {
         apply_v1(settings);
         applied = 1;
@@ -141,10 +140,9 @@ fn apply_pending(settings: &mut AppSettings, mut applied: u32) -> u32 {
         applied = 5;
     }
     if applied == 5 {
-        apply_v6(settings);
-        applied = 6;
+        applied = VERSION;
     }
-    applied
+    (applied, migrated_f1)
 }
 
 #[cfg(test)]
@@ -263,15 +261,41 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn v6_can_run_after_model_selection_in_the_same_launch() {
+    fn f1_migrates_at_launch_without_a_model_and_only_once() {
         let mut s = crate::settings::get_default_settings();
         s.selected_model.clear();
+        s.start_hidden = false;
         set_transcribe(&mut s, OLD_TRANSCRIBE_DEFAULT, OLD_TRANSCRIBE_DEFAULT);
-        let at_launch = apply_pending(&mut s, 1);
-        assert_eq!(at_launch, 1);
-        s.selected_model = "handy-computer/SenseVoiceSmall-gguf/x.gguf".into();
-        assert_eq!(apply_pending(&mut s, at_launch), VERSION);
+        assert_eq!(apply_pending(&mut s, 1), (1, true));
+        assert!(!s.start_hidden);
         assert_eq!(s.bindings["transcribe"].current_binding, "f1");
+        assert_eq!(s.bindings["transcribe"].default_binding, "f1");
+        set_transcribe(&mut s, OLD_TRANSCRIBE_DEFAULT, "f1");
+        s.selected_model = "handy-computer/SenseVoiceSmall-gguf/x.gguf".into();
+        assert_eq!(apply_pending(&mut s, 1), (VERSION, false));
+        assert!(s.start_hidden);
+        assert_eq!(
+            s.bindings["transcribe"].current_binding,
+            OLD_TRANSCRIBE_DEFAULT
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn f1_migration_preserves_both_preexisting_aliases() {
+        let mut s = crate::settings::get_default_settings();
+        set_transcribe(&mut s, "fn+f1", OLD_TRANSCRIBE_DEFAULT);
+        s.bindings
+            .get_mut("transcribe_with_post_process")
+            .unwrap()
+            .current_binding = "f1".into();
+        assert_eq!(apply_pending(&mut s, VERSION), (VERSION, true));
+        assert_eq!(s.bindings["transcribe"].current_binding, "fn+f1");
+        assert_eq!(s.bindings["transcribe"].default_binding, "f1");
+        assert_eq!(
+            s.bindings["transcribe_with_post_process"].current_binding,
+            "f1"
+        );
     }
 
     #[test]

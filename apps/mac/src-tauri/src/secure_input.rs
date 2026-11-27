@@ -386,6 +386,17 @@ mod imp {
         crate::tray::refresh_tray_icon(app);
     }
 
+    fn notify_shortcut_handoff(app: &AppHandle) {
+        if settings::get_settings(app).keyboard_implementation == KeyboardImplementation::HandyKeys
+        {
+            if let Some(coordinator) =
+                app.try_state::<crate::transcription_coordinator::TranscriptionCoordinator>()
+            {
+                coordinator.notify_secure_input_handoff();
+            }
+        }
+    }
+
     pub fn start_monitor(app: &AppHandle) {
         let state = app.state::<SecureInputState>();
         if state.monitor_started.swap(true, Ordering::SeqCst) {
@@ -411,6 +422,7 @@ mod imp {
                     }
                     *state.culprit.lock().unwrap() = culprit;
                     state.enabled.store(true, Ordering::SeqCst);
+                    notify_shortcut_handoff(&app);
                     // Arm the fallback right away: the event tap is already
                     // blind to KeyDown, so waiting would leave keyed
                     // dictation shortcuts dead for the threshold.
@@ -436,6 +448,7 @@ mod imp {
                     // Drops every shadow and emits the cleared status, so the
                     // banner and tray badge go away on release.
                     reconcile_fallback(&app);
+                    notify_shortcut_handoff(&app);
                 }
             }
         });

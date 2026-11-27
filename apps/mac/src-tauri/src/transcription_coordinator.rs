@@ -77,6 +77,8 @@ struct Hold {
     /// ignored. Always set for toggle; set for hold-or-toggle once a release
     /// has been classified as a tap.
     locked: bool,
+    #[cfg(target_os = "macos")]
+    f1: bool,
 }
 
 /// What to do with an input that arrives while the pipeline is busy
@@ -170,7 +172,11 @@ enum Effect {
 /// Commands processed sequentially by the coordinator thread.
 enum Command {
     Input(InputEvent),
-    Cancel { recording_was_active: bool },
+    Cancel {
+        recording_was_active: bool,
+    },
+    #[cfg(target_os = "macos")]
+    SecureInputHandoff,
     ProcessingFinished,
 }
 
@@ -478,6 +484,25 @@ impl CoordinatorState {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    fn on_secure_input_handoff(&mut self) -> bool {
+        if self.pending_release.is_some() || self.is_locked() {
+            return false;
+        }
+        if self.hold.as_ref().is_some_and(|hold| hold.f1) {
+            self.on_cancel(true);
+            return true;
+        }
+        if self
+            .pending_press
+            .as_ref()
+            .is_some_and(|press| crate::atype::hotkey::is_f1_binding(&press.hotkey_string))
+        {
+            self.pending_press = None;
+        }
+        false
+    }
+
     fn on_processing_finished(&mut self) -> Option<Effect> {
         self.stage = Stage::Idle;
         self.hold = None;
@@ -514,7 +539,12 @@ impl CoordinatorState {
         locked: bool,
     ) -> Effect {
         self.stage = Stage::Recording(binding_id.clone());
-        self.hold = Some(Hold { pressed_at, locked });
+        self.hold = Some(Hold {
+            pressed_at,
+            locked,
+            #[cfg(target_os = "macos")]
+            f1: crate::atype::hotkey::is_f1_binding(&hotkey_string),
+        });
         Effect::Start {
             binding_id,
             hotkey_string,
@@ -580,6 +610,12 @@ impl TranscriptionCoordinator {
                         Command::Cancel {
                             recording_was_active,
                         } => state.on_cancel(recording_was_active),
+                        #[cfg(target_os = "macos")]
+                        Command::SecureInputHandoff => {
+                            if state.on_secure_input_handoff() {
+                                crate::utils::cancel_operation(&app);
+                            }
+                        }
                         Command::ProcessingFinished => {
                             if let Some(effect) = state.on_processing_finished() {
                                 run_effect(&app, &mut state, effect);
@@ -667,6 +703,13 @@ impl TranscriptionCoordinator {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn notify_secure_input_handoff(&self) {
+        if self.tx.send(Command::SecureInputHandoff).is_err() {
+            warn!("Transcription coordinator channel closed");
+        }
+    }
+
     pub fn notify_processing_finished(&self) {
         if self.tx.send(Command::ProcessingFinished).is_err() {
             warn!("Transcription coordinator channel closed");
@@ -718,6 +761,66 @@ fn stop(app: &AppHandle, binding_id: &str, hotkey_string: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn f1_secure_input_handoff_cancels_a_hold_and_ignores_a_late_release() {
+        let now = Instant::now();
+        for hotkey in ["f1", "fn+f1", "Shift+F1"] {
+            let mut state = CoordinatorState::new();
+            let edge = |is_pressed| InputEvent {
+                hotkey_string: hotkey.into(),
+                ..input(ShortcutActivation::PushToTalk, is_pressed)
+            };
+            assert!(matches!(
+                state.on_input(edge(true), now),
+                Some(Effect::Start { .. })
+            ));
+            assert!(state.on_secure_input_handoff());
+            assert_eq!(state.stage, Stage::Idle);
+            assert!(state.on_input(edge(false), now + ms(100)).is_none());
+            assert!(matches!(
+                state.on_input(edge(true), now + ms(200)),
+                Some(Effect::Start { .. })
+            ));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn f1_secure_input_handoff_keeps_locked_and_released_recordings() {
+        let now = Instant::now();
+        let mut state = CoordinatorState::new();
+        let edge = |mode, is_pressed| InputEvent {
+            hotkey_string: "f1".into(),
+            ..input(mode, is_pressed)
+        };
+        state.on_input(edge(ShortcutActivation::Toggle, true), now);
+        assert!(!state.on_secure_input_handoff());
+        assert!(state.is_locked());
+
+        let mut state = CoordinatorState::new();
+        state.on_input(edge(ShortcutActivation::PushToTalk, true), now);
+        state.on_input(edge(ShortcutActivation::PushToTalk, false), now + ms(100));
+        assert!(!state.on_secure_input_handoff());
+        assert!(matches!(
+            state.on_grace_expired(),
+            Some(Effect::Stop { .. })
+        ));
+        state.on_input(edge(ShortcutActivation::PushToTalk, true), now + ms(200));
+        assert!(!state.on_secure_input_handoff());
+        assert!(state.on_processing_finished().is_none());
+
+        state.on_input(
+            InputEvent {
+                hotkey_string: "option+space".into(),
+                ..input(ShortcutActivation::PushToTalk, true)
+            },
+            now + ms(300),
+        );
+        assert!(!state.on_secure_input_handoff());
+        assert!(matches!(state.stage, Stage::Recording(_)));
+    }
 
     #[test]
     fn push_to_talk_release_while_recording_defers_release() {

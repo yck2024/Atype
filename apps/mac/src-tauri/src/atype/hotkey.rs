@@ -1,12 +1,8 @@
 use std::borrow::Cow;
 
 use handy_keys::{Hotkey, Key, Modifiers};
-use tauri_plugin_global_shortcut::Shortcut;
 
-use crate::settings::{AppSettings, KeyboardImplementation};
-
-#[cfg(target_os = "macos")]
-pub mod tap;
+use crate::settings::AppSettings;
 
 fn is_macos_f1(hotkey: Hotkey) -> bool {
     cfg!(target_os = "macos") && hotkey.key == Some(Key::F1)
@@ -30,29 +26,27 @@ pub fn canonical(binding: &str) -> Cow<'_, str> {
     }
 }
 
-pub fn binding_is_taken(settings: &AppSettings, id: &str, binding: &str) -> bool {
-    fn taken<T: PartialEq>(
-        settings: &AppSettings,
-        id: &str,
-        binding: &str,
-        parse: impl Fn(&str) -> Option<T>,
-    ) -> bool {
-        let candidate = parse(binding);
-        settings.bindings.iter().any(|(other_id, other)| {
-            other_id != id
-                && (other.current_binding == binding
-                    || candidate.as_ref().is_some_and(|candidate| {
-                        parse(&other.current_binding).as_ref() == Some(candidate)
-                    }))
-        })
+pub fn for_tap(binding: &str) -> handy_keys::Result<Hotkey> {
+    let mut hotkey = binding.parse()?;
+    if is_macos_f1(hotkey) {
+        hotkey.modifiers.insert(Modifiers::FN);
     }
+    Ok(hotkey)
+}
 
-    match settings.keyboard_implementation {
-        KeyboardImplementation::HandyKeys => taken(settings, id, binding, |raw| parse(raw).ok()),
-        KeyboardImplementation::Tauri => taken(settings, id, binding, |raw| {
-            canonical(raw).parse::<Shortcut>().ok()
-        }),
-    }
+#[cfg(target_os = "macos")]
+pub fn is_f1_binding(binding: &str) -> bool {
+    binding.parse().is_ok_and(is_macos_f1)
+}
+
+pub fn f1_conflict(settings: &AppSettings, id: &str, binding: &str) -> bool {
+    let Ok(candidate) = parse(binding) else {
+        return false;
+    };
+    is_macos_f1(candidate)
+        && settings.bindings.iter().any(|(other_id, other)| {
+            other_id != id && parse(&other.current_binding).is_ok_and(|key| key == candidate)
+        })
 }
 
 #[cfg(all(test, target_os = "macos"))]
@@ -67,9 +61,23 @@ mod tests {
     }
 
     #[test]
-    fn other_bindings_are_untouched() {
-        for binding in ["option+space", "fn", "fn+space", "fn+f2", "fn+f20", "f24"] {
+    fn f1_alone_gets_fn_for_the_existing_tap() {
+        assert_eq!(for_tap("f1").unwrap(), "fn+f1".parse().unwrap());
+        assert_eq!(
+            for_tap("fn+shift+f1").unwrap(),
+            for_tap("shift+f1").unwrap()
+        );
+        for binding in [
+            "option+space",
+            "fn",
+            "fn+space",
+            "f2",
+            "fn+f2",
+            "fn+f20",
+            "f24",
+        ] {
             assert_eq!(canonical(binding), binding);
+            assert_eq!(for_tap(binding).ok(), binding.parse::<Hotkey>().ok());
         }
     }
 
@@ -82,26 +90,25 @@ mod tests {
             .get_mut("transcribe")
             .unwrap()
             .current_binding = "option+space".into();
-        for implementation in [
-            KeyboardImplementation::HandyKeys,
-            KeyboardImplementation::Tauri,
+        for (existing, candidate) in [
+            ("fn+f1", "f1"),
+            ("f1", "function + F1"),
+            ("fn+shift+f1", "shift+f1"),
         ] {
-            settings.keyboard_implementation = implementation;
-            for (existing, candidate) in [("fn+f1", "f1"), ("f1", "function + F1")] {
-                settings
-                    .bindings
-                    .get_mut("transcribe_with_post_process")
-                    .unwrap()
-                    .current_binding = existing.into();
-                assert!(binding_is_taken(&settings, "transcribe", candidate));
-                assert!(binding_is_taken(&settings, "cancel", candidate));
-                assert!(!binding_is_taken(&settings, "transcribe", "shift+f1"));
-            }
-            assert!(!binding_is_taken(
+            settings
+                .bindings
+                .get_mut("transcribe_with_post_process")
+                .unwrap()
+                .current_binding = existing.into();
+            assert!(f1_conflict(&settings, "transcribe", candidate));
+            assert!(f1_conflict(&settings, "cancel", candidate));
+            assert!(!f1_conflict(
                 &settings,
                 "transcribe_with_post_process",
-                "f1"
+                candidate
             ));
+            assert!(!f1_conflict(&settings, "transcribe", "command+f1"));
         }
+        assert!(!f1_conflict(&settings, "transcribe", "escape"));
     }
 }
