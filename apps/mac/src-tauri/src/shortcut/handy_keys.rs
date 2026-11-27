@@ -27,7 +27,11 @@
 //! polled from a dedicated recording thread. Events are emitted to the frontend
 //! via Tauri's event system.
 
-use handy_keys::{Hotkey, HotkeyId, HotkeyManager, HotkeyState, KeyboardListener};
+#[cfg(target_os = "macos")]
+use crate::atype::hotkey::tap::{HotkeyId, HotkeyManager};
+use handy_keys::{Hotkey, HotkeyState, KeyboardListener};
+#[cfg(not(target_os = "macos"))]
+use handy_keys::{HotkeyId, HotkeyManager};
 use log::{debug, error, info};
 use serde::Serialize;
 use specta::Type;
@@ -111,7 +115,7 @@ impl HandyKeysState {
         info!("handy-keys manager thread started");
 
         // Create the HotkeyManager in this thread
-        let manager = match HotkeyManager::new_with_blocking() {
+        let mut manager = match HotkeyManager::new_with_blocking() {
             Ok(m) => m,
             Err(e) => {
                 error!("Failed to create HotkeyManager: {}", e);
@@ -145,7 +149,7 @@ impl HandyKeysState {
                         response,
                     } => {
                         let result = Self::do_register(
-                            &manager,
+                            &mut manager,
                             &mut binding_to_hotkey,
                             &mut hotkey_to_binding,
                             &binding_id,
@@ -158,7 +162,7 @@ impl HandyKeysState {
                         response,
                     } => {
                         let result = Self::do_unregister(
-                            &manager,
+                            &mut manager,
                             &mut binding_to_hotkey,
                             &mut hotkey_to_binding,
                             &binding_id,
@@ -185,14 +189,14 @@ impl HandyKeysState {
 
     /// Register a hotkey
     fn do_register(
-        manager: &HotkeyManager,
+        manager: &mut HotkeyManager,
         binding_to_hotkey: &mut HashMap<String, HotkeyId>,
         hotkey_to_binding: &mut HashMap<HotkeyId, (String, String)>,
         binding_id: &str,
         hotkey_string: &str,
     ) -> Result<(), String> {
-        let hotkey: Hotkey = crate::atype::hotkey::for_tap(hotkey_string)
-            .parse()
+        let hotkey = hotkey_string
+            .parse::<Hotkey>()
             .map_err(|e| format!("Failed to parse hotkey '{}': {}", hotkey_string, e))?;
 
         let id = manager
@@ -211,7 +215,7 @@ impl HandyKeysState {
 
     /// Unregister a hotkey
     fn do_unregister(
-        manager: &HotkeyManager,
+        manager: &mut HotkeyManager,
         binding_to_hotkey: &mut HashMap<String, HotkeyId>,
         hotkey_to_binding: &mut HashMap<HotkeyId, (String, String)>,
         binding_id: &str,
@@ -312,14 +316,17 @@ impl HandyKeysState {
 
             if let Some(key_event) = event {
                 // Convert to frontend-friendly format
+                let hotkey = key_event
+                    .as_hotkey()
+                    .ok()
+                    .map(crate::atype::hotkey::without_synthetic_fn);
                 let frontend_event = FrontendKeyEvent {
-                    modifiers: modifiers_to_strings(key_event.modifiers),
+                    modifiers: modifiers_to_strings(
+                        hotkey.map_or(key_event.modifiers, |h| h.modifiers),
+                    ),
                     key: key_event.key.map(|k| k.to_string().to_lowercase()),
                     is_key_down: key_event.is_key_down,
-                    hotkey_string: key_event
-                        .as_hotkey()
-                        .map(|h| crate::atype::hotkey::canonical(&h.to_handy_string()))
-                        .unwrap_or_default(),
+                    hotkey_string: hotkey.map(|h| h.to_handy_string()).unwrap_or_default(),
                 };
 
                 // Emit to frontend

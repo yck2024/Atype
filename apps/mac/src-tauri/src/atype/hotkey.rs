@@ -1,63 +1,57 @@
-//! Function keys (F1–F20) as shortcuts on macOS.
-//!
-//! macOS sets the fn flag on every function-key event whether or not fn is
-//! held, and handy-keys matches fn exactly. A stored `f1` would therefore
-//! never fire, and the recorder would save `fn+f1`, which reads as "hold fn"
-//! (on a Mac with standard function keys, fn+F1 is brightness instead).
-//!
-//! Atype stores function keys without fn ([`canonical`], used by the
-//! recorder) and adds it back only when registering with the event tap
-//! ([`for_tap`]). The Secure Input fallback reads the stored form, so `f1`
-//! also gets a Carbon shadow, which `fn+f1` could not.
-//!
-//! Hooks into Handy code (each a one-line call):
-//! - `shortcut::handy_keys` registration → [`for_tap`]
-//! - `shortcut::handy_keys` recorder → [`canonical`]
+use std::borrow::Cow;
 
 use handy_keys::{Hotkey, Key, Modifiers};
+use tauri_plugin_global_shortcut::Shortcut;
 
-fn is_function_key(key: &Key) -> bool {
-    let name = key.to_string();
-    name.len() > 1 && name.starts_with('F') && name[1..].parse::<u8>().is_ok()
+use crate::settings::{AppSettings, KeyboardImplementation};
+
+#[cfg(target_os = "macos")]
+pub mod tap;
+
+fn is_macos_f1(hotkey: Hotkey) -> bool {
+    cfg!(target_os = "macos") && hotkey.key == Some(Key::F1)
 }
 
-/// Rewrite a function-key binding with or without fn; anything else
-/// (including unparseable strings) is returned unchanged.
-fn with_fn(binding: &str, fn_held: bool) -> String {
-    let Ok(hotkey) = binding.parse::<Hotkey>() else {
-        return binding.to_string();
-    };
-    if !hotkey.key.as_ref().is_some_and(is_function_key) {
-        return binding.to_string();
+pub(crate) fn without_synthetic_fn(mut hotkey: Hotkey) -> Hotkey {
+    if is_macos_f1(hotkey) {
+        hotkey.modifiers.remove(Modifiers::FN);
     }
-    let modifiers = if fn_held {
-        hotkey.modifiers | Modifiers::FN
-    } else {
-        hotkey.modifiers - Modifiers::FN
-    };
-    if modifiers == hotkey.modifiers {
-        return binding.to_string();
-    }
-    Hotkey::new(modifiers, hotkey.key)
-        .map(|h| h.to_handy_string())
-        .unwrap_or_else(|_| binding.to_string())
+    hotkey
 }
 
-/// The form to store and show: `fn+f1` → `f1` on macOS.
-pub fn canonical(binding: &str) -> String {
-    if cfg!(target_os = "macos") {
-        with_fn(binding, false)
-    } else {
-        binding.to_string()
+pub fn parse(binding: &str) -> handy_keys::Result<Hotkey> {
+    binding.parse().map(without_synthetic_fn)
+}
+
+pub fn canonical(binding: &str) -> Cow<'_, str> {
+    match parse(binding) {
+        Ok(hotkey) if is_macos_f1(hotkey) => Cow::Owned(hotkey.to_handy_string()),
+        _ => Cow::Borrowed(binding),
     }
 }
 
-/// The form the macOS event tap actually sees: `f1` → `fn+f1`.
-pub fn for_tap(binding: &str) -> String {
-    if cfg!(target_os = "macos") {
-        with_fn(binding, true)
-    } else {
-        binding.to_string()
+pub fn binding_is_taken(settings: &AppSettings, id: &str, binding: &str) -> bool {
+    fn taken<T: PartialEq>(
+        settings: &AppSettings,
+        id: &str,
+        binding: &str,
+        parse: impl Fn(&str) -> Option<T>,
+    ) -> bool {
+        let candidate = parse(binding);
+        settings.bindings.iter().any(|(other_id, other)| {
+            other_id != id
+                && (other.current_binding == binding
+                    || candidate.as_ref().is_some_and(|candidate| {
+                        parse(&other.current_binding).as_ref() == Some(candidate)
+                    }))
+        })
+    }
+
+    match settings.keyboard_implementation {
+        KeyboardImplementation::HandyKeys => taken(settings, id, binding, |raw| parse(raw).ok()),
+        KeyboardImplementation::Tauri => taken(settings, id, binding, |raw| {
+            canonical(raw).parse::<Shortcut>().ok()
+        }),
     }
 }
 
@@ -65,38 +59,49 @@ pub fn for_tap(binding: &str) -> String {
 mod tests {
     use super::*;
 
-    fn same(a: &str, b: &str) -> bool {
-        a.parse::<Hotkey>().unwrap() == b.parse::<Hotkey>().unwrap()
-    }
-
     #[test]
-    fn function_keys_drop_fn_when_stored() {
-        assert!(same(&canonical("fn+f1"), "f1"));
-        assert!(same(&canonical("fn+shift+f12"), "shift+f12"));
-        assert!(same(&canonical("fn+f20"), "f20"));
+    fn f1_drops_fn_when_recorded_and_preserves_other_modifiers() {
+        assert_eq!(canonical("fn+f1"), "f1");
+        assert_eq!(canonical("Shift_Right + Function + F1"), "shift_right+f1");
         assert_eq!(canonical("f1"), "f1");
     }
 
     #[test]
-    fn function_keys_gain_fn_for_the_tap() {
-        assert!(same(&for_tap("f1"), "fn+f1"));
-        assert!(same(&for_tap("option+f5"), "fn+option+f5"));
-        assert_eq!(for_tap("fn+f1"), "fn+f1");
+    fn other_bindings_are_untouched() {
+        for binding in ["option+space", "fn", "fn+space", "fn+f2", "fn+f20", "f24"] {
+            assert_eq!(canonical(binding), binding);
+        }
     }
 
     #[test]
-    fn other_bindings_are_untouched() {
-        for b in [
-            "option+space",
-            "fn",
-            "fn+space",
-            "option_right+command_right",
-            "escape",
-            "f",
-            "not a hotkey",
+    fn stored_bindings_reserve_f1_even_when_not_registered() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.post_process_enabled = false;
+        settings
+            .bindings
+            .get_mut("transcribe")
+            .unwrap()
+            .current_binding = "option+space".into();
+        for implementation in [
+            KeyboardImplementation::HandyKeys,
+            KeyboardImplementation::Tauri,
         ] {
-            assert_eq!(canonical(b), b);
-            assert_eq!(for_tap(b), b);
+            settings.keyboard_implementation = implementation;
+            for (existing, candidate) in [("fn+f1", "f1"), ("f1", "function + F1")] {
+                settings
+                    .bindings
+                    .get_mut("transcribe_with_post_process")
+                    .unwrap()
+                    .current_binding = existing.into();
+                assert!(binding_is_taken(&settings, "transcribe", candidate));
+                assert!(binding_is_taken(&settings, "cancel", candidate));
+                assert!(!binding_is_taken(&settings, "transcribe", "shift+f1"));
+            }
+            assert!(!binding_is_taken(
+                &settings,
+                "transcribe_with_post_process",
+                "f1"
+            ));
         }
     }
 }

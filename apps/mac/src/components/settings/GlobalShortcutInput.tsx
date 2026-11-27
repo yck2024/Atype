@@ -292,7 +292,11 @@ export const GlobalShortcutInput: React.FC<GlobalShortcutInputProps> = ({
           </div>
         )}
         <ResetButton
-          onClick={() => resetBinding(shortcutId)}
+          onClick={() =>
+            resetBinding(shortcutId).catch(() =>
+              toast.error(t("settings.general.shortcut.errors.reset")),
+            )
+          }
           disabled={isUpdating(`binding_${shortcutId}`)}
         />
       </div>

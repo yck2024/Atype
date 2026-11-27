@@ -488,7 +488,7 @@ mod imp {
     }
 
     pub(super) fn plan_fallback_binding(id: &str, binding: &ShortcutBinding) -> ShadowPlan {
-        let Ok(hotkey) = binding.current_binding.parse::<handy_keys::Hotkey>() else {
+        let Ok(hotkey) = crate::atype::hotkey::parse(&binding.current_binding) else {
             warn!(
                 "SecureInput fallback: '{}' has unparseable binding '{}', skipping",
                 id, binding.current_binding
@@ -890,19 +890,19 @@ mod tests {
         }
     }
 
-    /// Atype stores F1 without fn, so it keeps working through Carbon; a
-    /// recorded `fn+f1` could not be shadowed.
     #[test]
-    fn the_f1_default_is_shadowed_through_carbon() {
-        match plan_fallback_binding("transcribe", &binding("transcribe", "f1")) {
-            ShadowPlan::Shadow { shadow, degraded } => {
-                assert!(!degraded);
-                assert_eq!(shadow.current_binding, "f1");
+    fn f1_is_shadowed_through_carbon_in_both_stored_forms() {
+        for (raw, expected) in [("f1", "f1"), ("fn+f1", "f1"), ("fn+shift+f1", "shift+f1")] {
+            match plan_fallback_binding("transcribe", &binding("transcribe", raw)) {
+                ShadowPlan::Shadow { shadow, degraded } => {
+                    assert!(!degraded);
+                    assert_eq!(shadow.current_binding, expected);
+                }
+                _ => panic!("{raw} should be shadowed through Carbon"),
             }
-            _ => panic!("f1 should be shadowed through Carbon"),
         }
         assert!(matches!(
-            plan_fallback_binding("transcribe", &binding("transcribe", "fn+f1")),
+            plan_fallback_binding("transcribe", &binding("transcribe", "fn+f2")),
             ShadowPlan::Uncovered
         ));
     }

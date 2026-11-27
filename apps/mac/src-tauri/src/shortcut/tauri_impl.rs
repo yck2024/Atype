@@ -40,6 +40,11 @@ pub fn init_shortcuts(app: &AppHandle) {
 /// Validate a shortcut string for the Tauri global-shortcut implementation.
 /// Tauri requires at least one non-modifier key and doesn't support the fn key.
 pub fn validate_shortcut(raw: &str) -> Result<(), String> {
+    parse_shortcut(raw).map(|_| ())
+}
+
+fn parse_shortcut(raw: &str) -> Result<Shortcut, String> {
+    let raw = crate::atype::hotkey::canonical(raw);
     if raw.trim().is_empty() {
         return Err("Shortcut cannot be empty".into());
     }
@@ -69,33 +74,12 @@ pub fn validate_shortcut(raw: &str) -> Result<(), String> {
     // parser rejects. Parse here so a binding carried over from handy-keys is
     // reset to the default instead of failing to register.
     raw.parse::<Shortcut>()
-        .map(|_| ())
         .map_err(|e| format!("Failed to parse shortcut '{}': {}", raw, e))
 }
 
 /// Register a shortcut using Tauri's global-shortcut plugin
 pub fn register_shortcut(app: &AppHandle, binding: ShortcutBinding) -> Result<(), String> {
-    // Validate for Tauri requirements
-    if let Err(e) = validate_shortcut(&binding.current_binding) {
-        warn!(
-            "register_tauri_shortcut validation error for binding '{}': {}",
-            binding.current_binding, e
-        );
-        return Err(e);
-    }
-
-    // Parse shortcut and return error if it fails
-    let shortcut = match binding.current_binding.parse::<Shortcut>() {
-        Ok(s) => s,
-        Err(e) => {
-            let error_msg = format!(
-                "Failed to parse shortcut '{}': {}",
-                binding.current_binding, e
-            );
-            error!("register_tauri_shortcut parse error: {}", error_msg);
-            return Err(error_msg);
-        }
-    };
+    let shortcut = parse_shortcut(&binding.current_binding)?;
 
     // Prevent duplicate registrations that would silently shadow one another
     if app.global_shortcut().is_registered(shortcut) {
@@ -141,17 +125,7 @@ pub fn register_shortcut(app: &AppHandle, binding: ShortcutBinding) -> Result<()
 
 /// Unregister a shortcut from Tauri's global-shortcut plugin
 pub fn unregister_shortcut(app: &AppHandle, binding: ShortcutBinding) -> Result<(), String> {
-    let shortcut = match binding.current_binding.parse::<Shortcut>() {
-        Ok(s) => s,
-        Err(e) => {
-            let error_msg = format!(
-                "Failed to parse shortcut '{}' for unregistration: {}",
-                binding.current_binding, e
-            );
-            error!("unregister_tauri_shortcut parse error: {}", error_msg);
-            return Err(error_msg);
-        }
-    };
+    let shortcut = parse_shortcut(&binding.current_binding)?;
 
     app.global_shortcut().unregister(shortcut).map_err(|e| {
         let error_msg = format!(
@@ -168,6 +142,15 @@ pub fn unregister_shortcut(app: &AppHandle, binding: ShortcutBinding) -> Result<
 #[cfg(test)]
 mod tests {
     use super::validate_shortcut;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn parses_legacy_f1_as_the_same_accelerator_for_validation_and_registration() {
+        use super::parse_shortcut;
+        assert_eq!(validate_shortcut("fn+f1"), Ok(()));
+        assert_eq!(parse_shortcut("fn+shift+f1"), parse_shortcut("shift+f1"));
+        assert!(validate_shortcut("fn+f2").is_err());
+    }
 
     #[test]
     fn rejects_side_specific_modifiers_the_parser_cannot_register() {

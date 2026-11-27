@@ -32,6 +32,7 @@ use crate::tray;
 
 /// Initialize shortcuts using the configured implementation
 pub fn init_shortcuts(app: &AppHandle) {
+    crate::atype::defaults::apply_once(app);
     let user_settings = settings::load_or_create_app_settings(app);
 
     // Check which implementation to use
@@ -199,50 +200,28 @@ pub fn change_binding(
         }
     };
 
-    // If this is the cancel binding, just update the settings and return
-    // It's managed dynamically, so we don't register/unregister here
-    if id == "cancel" {
-        if let Some(mut b) = settings.bindings.get(&id).cloned() {
-            b.current_binding = binding;
-            settings.bindings.insert(id.clone(), b.clone());
-            settings::write_settings(&app, settings);
-            crate::secure_input::reconcile_fallback(&app);
-            return Ok(BindingResponse {
-                success: true,
-                binding: Some(b.clone()),
-                error: None,
-            });
-        }
+    validate_shortcut_for_implementation(&binding, settings.keyboard_implementation)?;
+    if crate::atype::hotkey::binding_is_taken(&settings, &id, &binding) {
+        return Err(format!("Shortcut '{}' is already in use", binding));
     }
 
-    // Unregister the existing binding
-    if let Err(e) = unregister_shortcut(&app, binding_to_modify.clone()) {
-        let error_msg = format!("Failed to unregister shortcut: {}", e);
-        error!("change_binding error: {}", error_msg);
-    }
-
-    // Validate the new shortcut for the current keyboard implementation
-    if let Err(e) = validate_shortcut_for_implementation(&binding, settings.keyboard_implementation)
-    {
-        warn!("change_binding validation error: {}", e);
-        restore_registration(&app, &binding_to_modify);
-        return Err(e);
-    }
-
-    // Create an updated binding
     let mut updated_binding = binding_to_modify.clone();
     updated_binding.current_binding = binding;
 
-    // Register the new binding
-    if let Err(e) = register_shortcut(&app, updated_binding.clone()) {
-        let error_msg = format!("Failed to register shortcut: {}", e);
-        error!("change_binding error: {}", error_msg);
-        restore_registration(&app, &binding_to_modify);
-        return Ok(BindingResponse {
-            success: false,
-            binding: None,
-            error: Some(error_msg),
-        });
+    if id != "cancel" {
+        if let Err(e) = unregister_shortcut(&app, binding_to_modify.clone()) {
+            error!("change_binding error: Failed to unregister shortcut: {}", e);
+        }
+        if let Err(e) = register_shortcut(&app, updated_binding.clone()) {
+            let error_msg = format!("Failed to register shortcut: {}", e);
+            error!("change_binding error: {}", error_msg);
+            restore_registration(&app, &binding_to_modify);
+            return Ok(BindingResponse {
+                success: false,
+                binding: None,
+                error: Some(error_msg),
+            });
+        }
     }
 
     // Update the binding in the settings
@@ -513,6 +492,17 @@ fn register_all_shortcuts_for_implementation(
         if let Err(e) =
             validate_shortcut_for_implementation(&binding.current_binding, implementation)
         {
+            if crate::atype::hotkey::binding_is_taken(
+                &current_settings,
+                id,
+                &default_binding.current_binding,
+            ) {
+                warn!(
+                    "Shortcut '{}' is invalid for {:?} and its default is already in use: {}",
+                    id, implementation, e
+                );
+                continue;
+            }
             info!(
                 "Shortcut '{}' ({}) is invalid for {:?}: {}. Resetting to default.",
                 id, binding.current_binding, implementation, e

@@ -16,18 +16,21 @@ import { FunctionKeyHint } from "../atype/FunctionKeyHint";
 
 export const GeneralSettings: React.FC = () => {
   const { t } = useTranslation();
-  const { audioFeedbackEnabled } = useSettings();
-  const isLinux = type() === "linux";
+  const { audioFeedbackEnabled, getSetting } = useSettings();
+  const osType = type();
+  const showFunctionKeyHint =
+    osType === "macos" &&
+    getSetting("bindings")?.transcribe?.current_binding === "f1";
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
       <SettingsGroup title={t("settings.general.title")}>
         <div>
           <ShortcutInput shortcutId="transcribe" grouped={true} />
-          <FunctionKeyHint shortcutId="transcribe" />
+          {showFunctionKeyHint && <FunctionKeyHint />}
         </div>
         <ShortcutActivationSetting descriptionMode="tooltip" grouped={true} />
         {/* Cancel shortcut remains hidden on Linux because of dynamic shortcut instability. */}
-        {!isLinux && <ShortcutInput shortcutId="cancel" grouped={true} />}
+        {osType !== "linux" && <ShortcutInput shortcutId="cancel" grouped={true} />}
       </SettingsGroup>
       <ModelSettingsCard />
       <SettingsGroup title={t("settings.sound.title")}>
