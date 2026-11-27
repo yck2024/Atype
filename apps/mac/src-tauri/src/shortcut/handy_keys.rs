@@ -39,6 +39,7 @@ use std::thread::{self, JoinHandle};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::settings::{self, get_settings, ShortcutBinding};
+use crate::transcription_coordinator::InputSource;
 
 use super::handler::handle_shortcut_event;
 
@@ -53,6 +54,8 @@ enum ManagerCommand {
         binding_id: String,
         response: Sender<Result<(), String>>,
     },
+    #[cfg(target_os = "macos")]
+    ResetF1(Sender<()>),
     Shutdown,
 }
 
@@ -132,7 +135,13 @@ impl HandyKeysState {
                         binding_id, hotkey_string, event.state
                     );
                     let is_pressed = event.state == HotkeyState::Pressed;
-                    handle_shortcut_event(&app, binding_id, hotkey_string, is_pressed);
+                    handle_shortcut_event(
+                        &app,
+                        binding_id,
+                        hotkey_string,
+                        is_pressed,
+                        InputSource::HandyKeys,
+                    );
                 }
             }
 
@@ -164,6 +173,39 @@ impl HandyKeysState {
                             &binding_id,
                         );
                         let _ = response.send(result);
+                    }
+                    #[cfg(target_os = "macos")]
+                    ManagerCommand::ResetF1(done) => {
+                        let f1_bindings: Vec<_> = hotkey_to_binding
+                            .values()
+                            .filter(|(_, key)| crate::atype::hotkey::is_f1_binding(key))
+                            .cloned()
+                            .collect();
+                        for (id, key) in f1_bindings {
+                            if let Err(e) = Self::do_unregister(
+                                &manager,
+                                &mut binding_to_hotkey,
+                                &mut hotkey_to_binding,
+                                &id,
+                            )
+                            .and_then(|()| {
+                                Self::do_register(
+                                    &manager,
+                                    &mut binding_to_hotkey,
+                                    &mut hotkey_to_binding,
+                                    &id,
+                                    &key,
+                                )
+                            }) {
+                                error!("Failed to reset tap registration for '{id}': {e}");
+                            }
+                        }
+                        if let Some(coordinator) =
+                            app.try_state::<crate::TranscriptionCoordinator>()
+                        {
+                            coordinator.notify_secure_input_handoff(InputSource::HandyKeys);
+                        }
+                        let _ = done.send(());
                     }
                     ManagerCommand::Shutdown => {
                         info!("handy-keys manager thread shutting down");
@@ -256,6 +298,18 @@ impl HandyKeysState {
 
         rx.recv()
             .map_err(|_| "Failed to receive unregister response")?
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn reset_f1_for_secure_input(&self) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.command_sender
+            .lock()
+            .map_err(|_| "Failed to lock command_sender")?
+            .send(ManagerCommand::ResetF1(tx))
+            .map_err(|_| "Failed to send F1 reset command")?;
+        rx.recv()
+            .map_err(|_| "Failed to receive F1 reset response".into())
     }
 
     /// Start recording mode for a specific binding

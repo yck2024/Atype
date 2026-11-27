@@ -10,7 +10,7 @@ use tauri::{AppHandle, Manager};
 use crate::actions::ACTION_MAP;
 use crate::managers::audio::AudioRecordingManager;
 use crate::settings::get_settings;
-use crate::transcription_coordinator::is_transcribe_binding;
+use crate::transcription_coordinator::{is_transcribe_binding, InputSource};
 use crate::TranscriptionCoordinator;
 
 /// Handle a shortcut event from either implementation.
@@ -31,6 +31,7 @@ pub fn handle_shortcut_event(
     binding_id: &str,
     hotkey_string: &str,
     is_pressed: bool,
+    source: InputSource,
 ) {
     let settings = get_settings(app);
 
@@ -43,6 +44,7 @@ pub fn handle_shortcut_event(
                 is_pressed,
                 settings.shortcut_activation,
                 std::time::Duration::from_millis(settings.hold_threshold_ms),
+                source,
             );
         } else {
             warn!("TranscriptionCoordinator is not initialized");

@@ -168,8 +168,8 @@
         "none": "未設定快捷鍵",
         "notFound": "未找到快捷鍵",
         "pressKeys": "請按鍵...",
-        "secureInputCapture": "macOS 的 Secure Input 目前開著，Atype 改從這個視窗錄製。請按一組快捷鍵，例如 Option + Space。Secure Input 解除前，無法錄製只有修飾鍵或含 fn 的快捷鍵。",
-        "secureInputCaptureWithCulprit": "{{name}} 正在使用 macOS 的 Secure Input，Atype 改從這個視窗錄製。請按一組快捷鍵，例如 Option + Space。它解除前，無法錄製只有修飾鍵或含 fn 的快捷鍵。",
+        "secureInputCapture": "macOS 的 Secure Input 目前開著，Atype 改從這個視窗錄製。仍可錄製 F1；如果 F1 會調整亮度，請按 fn + F1。Secure Input 解除前，無法錄製純修飾鍵或其他含 fn 的組合。",
+        "secureInputCaptureWithCulprit": "{{name}} 正在使用 macOS 的 Secure Input，Atype 改從這個視窗錄製。仍可錄製 F1；如果 F1 會調整亮度，請按 fn + F1。Secure Input 解除前，無法錄製純修飾鍵或其他含 fn 的組合。",
         "bindings": {
           "transcribe": {
             "name": "轉錄快捷鍵",

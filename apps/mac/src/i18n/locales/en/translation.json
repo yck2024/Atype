@@ -168,8 +168,8 @@
         "none": "No shortcuts configured",
         "notFound": "Shortcut not found",
         "pressKeys": "Press keys...",
-        "secureInputCapture": "macOS Secure Input is on, so Atype is recording from this window. Press a combination such as Option + Space. Modifier-only and fn shortcuts can't be recorded until Secure Input is released.",
-        "secureInputCaptureWithCulprit": "{{name}} is holding macOS Secure Input, so Atype is recording from this window. Press a combination such as Option + Space. Modifier-only and fn shortcuts can't be recorded until it is released.",
+        "secureInputCapture": "macOS Secure Input is on, so Atype is recording from this window. F1 still works: if F1 changes brightness, press fn + F1. Modifier-only shortcuts and other fn combinations can't be recorded until Secure Input is released.",
+        "secureInputCaptureWithCulprit": "{{name}} is holding macOS Secure Input, so Atype is recording from this window. F1 still works: if F1 changes brightness, press fn + F1. Modifier-only shortcuts and other fn combinations can't be recorded until Secure Input is released.",
         "bindings": {
           "transcribe": {
             "name": "Transcribe Shortcut",

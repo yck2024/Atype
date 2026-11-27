@@ -386,17 +386,6 @@ mod imp {
         crate::tray::refresh_tray_icon(app);
     }
 
-    fn notify_shortcut_handoff(app: &AppHandle) {
-        if settings::get_settings(app).keyboard_implementation == KeyboardImplementation::HandyKeys
-        {
-            if let Some(coordinator) =
-                app.try_state::<crate::transcription_coordinator::TranscriptionCoordinator>()
-            {
-                coordinator.notify_secure_input_handoff();
-            }
-        }
-    }
-
     pub fn start_monitor(app: &AppHandle) {
         let state = app.state::<SecureInputState>();
         if state.monitor_started.swap(true, Ordering::SeqCst) {
@@ -421,8 +410,18 @@ mod imp {
                         None => info!("SecureInput ENABLED (no visible holder)"),
                     }
                     *state.culprit.lock().unwrap() = culprit;
+                    if settings::get_settings(&app).keyboard_implementation
+                        == KeyboardImplementation::HandyKeys
+                    {
+                        if let Some(tap) =
+                            app.try_state::<crate::shortcut::handy_keys::HandyKeysState>()
+                        {
+                            if let Err(e) = tap.reset_f1_for_secure_input() {
+                                warn!("SecureInput: failed to reset tap F1: {e}");
+                            }
+                        }
+                    }
                     state.enabled.store(true, Ordering::SeqCst);
-                    notify_shortcut_handoff(&app);
                     // Arm the fallback right away: the event tap is already
                     // blind to KeyDown, so waiting would leave keyed
                     // dictation shortcuts dead for the threshold.
@@ -448,7 +447,11 @@ mod imp {
                     // Drops every shadow and emits the cleared status, so the
                     // banner and tray badge go away on release.
                     reconcile_fallback(&app);
-                    notify_shortcut_handoff(&app);
+                    if let Some(coordinator) = app.try_state::<crate::TranscriptionCoordinator>() {
+                        coordinator.notify_secure_input_handoff(
+                            crate::transcription_coordinator::InputSource::Carbon,
+                        );
+                    }
                 }
             }
         });
@@ -601,7 +604,7 @@ mod imp {
             );
         }
         for binding in stale {
-            if let Err(e) = crate::shortcut::tauri_impl::unregister_shortcut(app, binding.clone()) {
+            if let Err(e) = crate::shortcut::tauri_impl::unregister_shadow(app, binding.clone()) {
                 warn!(
                     "SecureInput fallback: failed to unregister '{}': {}",
                     binding.current_binding, e
@@ -624,7 +627,7 @@ mod imp {
                 continue;
             }
 
-            match crate::shortcut::tauri_impl::register_shortcut(app, shadow.clone()) {
+            match crate::shortcut::tauri_impl::register_shadow(app, shadow.clone()) {
                 Ok(()) => {
                     info!(
                         "SecureInput fallback: '{}' registered via Carbon as '{}'{}",

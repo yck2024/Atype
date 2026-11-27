@@ -583,7 +583,7 @@ impl AudioRecordingManager {
     /// Applies mute if mute_while_recording is enabled and stream is open.
     /// Snapshots the system's prior mute state first so `remove_mute` can
     /// restore it instead of unconditionally unmuting.
-    pub fn apply_mute(&self) {
+    pub fn apply_mute(&self, generation: u64) {
         let settings = get_settings(&self.app_handle);
         if !settings.mute_while_recording {
             return;
@@ -595,7 +595,7 @@ impl AudioRecordingManager {
         // Already muted this session — don't re-snapshot, or a duplicate/late
         // apply would overwrite prev_muted with our own forced-muted state and
         // strand audio muted on stop.
-        if mute_guard.did_mute {
+        if mute_guard.did_mute || !self.is_recording_readiness_current(generation) {
             return;
         }
         if *is_open {
@@ -1070,6 +1070,7 @@ impl AudioRecordingManager {
     pub fn cancel_recording(&self) {
         self.invalidate_recording_readiness();
         self.cancel_generation.fetch_add(1, Ordering::AcqRel);
+        self.remove_mute();
         let mut state = self.state.lock().unwrap();
 
         match *state {
